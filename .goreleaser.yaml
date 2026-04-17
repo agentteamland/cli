@@ -42,6 +42,80 @@ checksum:
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
 
+# Homebrew tap — publishes a formula to agentteamland/homebrew-tap on each tag.
+brews:
+  - name: atl
+    repository:
+      owner: agentteamland
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/agentteamland/cli"
+    description: "AgentTeamLand package manager CLI — install teams, scaffold projects"
+    license: "MIT"
+    commit_author:
+      name: agentteamland-bot
+      email: noreply@agentteamland.com
+    commit_msg_template: "chore: bump atl to {{ .Tag }}"
+    test: |
+      system "#{bin}/atl --version"
+    install: |
+      bin.install "atl"
+
+# Scoop bucket — publishes a manifest to agentteamland/scoop-bucket on each tag.
+scoops:
+  - name: atl
+    repository:
+      owner: agentteamland
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: "https://github.com/agentteamland/cli"
+    description: "AgentTeamLand package manager CLI"
+    license: "MIT"
+    commit_author:
+      name: agentteamland-bot
+      email: noreply@agentteamland.com
+    commit_msg_template: "chore: bump atl to {{ .Tag }}"
+
+# Winget — opens a PR to microsoft/winget-pkgs from our fork on each tag.
+# First submission requires Microsoft review (~1-2 weeks). Subsequent updates
+# auto-merge faster once publisher is trusted.
+winget:
+  - name: atl
+    publisher: agentteamland
+    license: MIT
+    homepage: "https://github.com/agentteamland/cli"
+    description: "AgentTeamLand package manager CLI — install teams, scaffold projects"
+    short_description: "AgentTeamLand CLI"
+    package_identifier: "agentteamland.atl"
+    publisher_support_url: "https://github.com/agentteamland/cli/issues"
+    publisher_url: "https://github.com/agentteamland"
+    copyright: "Copyright (c) 2026 AgentTeamLand"
+    release_notes_url: "https://github.com/agentteamland/cli/releases/tag/{{ .Tag }}"
+    tags:
+      - cli
+      - package-manager
+      - ai-agents
+      - devtool
+    commit_author:
+      name: agentteamland-bot
+      email: noreply@agentteamland.com
+    commit_msg_template: "chore: update atl to {{ .Version }}"
+    repository:
+      owner: agentteamland
+      name: winget-pkgs
+      branch: "atl-{{ .Version }}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
 changelog:
   sort: asc
   use: github

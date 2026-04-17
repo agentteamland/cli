@@ -6,16 +6,36 @@
 
 ## Install
 
-### One-liner (macOS / Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/agentteamland/cli/main/scripts/install.sh | sh
-```
-
-### Homebrew (coming soon)
+### macOS / Linux (Homebrew — recommended)
 
 ```bash
 brew install agentteamland/tap/atl
+```
+
+or:
+
+```bash
+brew tap agentteamland/tap
+brew install atl
+```
+
+### Windows (Scoop — recommended)
+
+```powershell
+scoop bucket add agentteamland https://github.com/agentteamland/scoop-bucket
+scoop install atl
+```
+
+### Windows (winget — after first Microsoft review completes)
+
+```powershell
+winget install agentteamland.atl
+```
+
+### One-liner fallback (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/agentteamland/cli/main/scripts/install.sh | sh
 ```
 
 ### Manual

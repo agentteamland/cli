@@ -1,8 +1,38 @@
-# atl — AgentTeamLand CLI
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agentteamland/workspace/main/assets/demo.gif" width="820" alt="atl demo — search, install, inherit"/>
+</p>
 
-> Install teams, scaffold projects, stay in sync.
+<h1 align="center">atl</h1>
 
-`atl` is the command-line package manager for the [AgentTeamLand](https://github.com/agentteamland) ecosystem. It installs teams of AI agents (plus their skills and rules) from the public registry — or any git URL — into your current project's `.claude/` directory, tracks what you've installed, and keeps it all up to date.
+<p align="center">
+  <b>AI agent teams, installed like packages.</b><br/>
+  <sub>A package manager CLI for the <a href="https://github.com/agentteamland">AgentTeamLand</a> ecosystem.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/agentteamland/cli/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/agentteamland/cli?style=flat-square"/></a>
+  <a href="https://github.com/agentteamland/cli/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/agentteamland/cli/ci.yml?branch=main&style=flat-square&label=ci"/></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/agentteamland/cli?style=flat-square"/></a>
+</p>
+
+---
+
+## In 30 seconds
+
+```bash
+# macOS / Linux
+brew install agentteamland/tap/atl
+
+# Windows
+scoop bucket add agentteamland https://github.com/agentteamland/scoop-bucket
+scoop install atl
+
+# Then, in any project:
+atl install software-project-team          # 13 specialized agents arrive
+#   → .NET API + Flutter + React + Postgres + RabbitMQ + Redis + Elasticsearch + MinIO
+```
+
+`atl` installs **teams** — curated sets of AI agents (plus their skills and rules) — from a public registry or any git URL, into your current project's `.claude/` directory. Teams can extend other teams, override agents by name, or exclude inherited agents they don't need.
 
 ## Install
 

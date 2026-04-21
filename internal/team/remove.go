@@ -5,50 +5,115 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/agentteamland/cli/internal/config"
 )
 
-// Remove deletes all symlinks belonging to the given team and removes it from
-// .team-installs.json. The cached repo directory is left intact (may be shared
-// with other projects).
+// Remove deletes the named team from the project and replays all remaining
+// installed teams' symlinks from scratch (wipe-and-replay pattern).
+//
+// This design removes the need to track per-symlink ownership: symlinks are
+// the deterministic output of "apply every installed team in installedAt
+// order." Remove simply filters out the target team and re-runs that algorithm.
+//
+// Net effect:
+//   - All of the target team's symlinks are gone.
+//   - Items the target team was "winning" (via collision overwrite of a
+//     previously-installed team's same-named item) correctly fall back to
+//     the original owner.
+//   - Cached source repos under ~/.claude/repos/agentteamland/ are left
+//     intact (they're shared across projects).
+//
+// Performance: symlink creation is ~5-10ms per item; no git / network work.
 func Remove(name, cwd string) error {
 	m, err := List(cwd)
 	if err != nil {
 		return err
 	}
 
-	var target *InstalledTeam
+	// Locate the target.
 	idx := -1
 	for i := range m.Teams {
 		if m.Teams[i].Name == name {
-			target = &m.Teams[i]
 			idx = i
 			break
 		}
 	}
-	if target == nil {
+	if idx == -1 {
 		return fmt.Errorf("team %q is not installed in this project", name)
 	}
 
+	// Build the list of remaining teams, sorted by original installedAt so
+	// replay reproduces the same last-wins outcome for collisions.
+	remaining := make([]InstalledTeam, 0, len(m.Teams)-1)
+	for i, t := range m.Teams {
+		if i == idx {
+			continue
+		}
+		remaining = append(remaining, t)
+	}
+	sort.SliceStable(remaining, func(i, j int) bool {
+		return remaining[i].InstalledAt < remaining[j].InstalledAt
+	})
+
+	// Wipe every symlink under .claude/{agents,skills,rules}/.
+	// Only symlinks are removed; any real files (e.g. project-local agents)
+	// are preserved.
 	projectClaude := config.ProjectClaudeDir(cwd)
-
-	// Remove agent symlinks.
-	for _, a := range target.Effective["agents"] {
-		dst := filepath.Join(projectClaude, "agents", a+".md")
-		_ = os.Remove(dst)
-	}
-	for _, s := range target.Effective["skills"] {
-		dst := filepath.Join(projectClaude, "skills", s)
-		_ = os.Remove(dst)
-	}
-	for _, r := range target.Effective["rules"] {
-		dst := filepath.Join(projectClaude, "rules", r+".md")
-		_ = os.Remove(dst)
+	if err := wipeSymlinks(projectClaude); err != nil {
+		return fmt.Errorf("wipe symlinks: %w", err)
 	}
 
-	// Remove from manifest.
-	m.Teams = append(m.Teams[:idx], m.Teams[idx+1:]...)
+	// Write the reduced manifest BEFORE replay. That way, the replay's
+	// collision-detection logic sees the correct "already installed" state
+	// at each step (no stale entry for the team being removed).
+	m.Teams = remaining
+	if err := writeManifestFile(cwd, m); err != nil {
+		return err
+	}
+
+	// Replay remaining teams in install-order. Collision warnings are
+	// suppressed here — they were already shown when each team was
+	// originally installed; replaying doesn't warrant re-surfacing them.
+	for _, t := range remaining {
+		if _, _, err := resolveAndSymlink(t.Name, cwd, false, false); err != nil {
+			return fmt.Errorf("replay %s: %w", t.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// wipeSymlinks removes every symlink under .claude/{agents,skills,rules}/
+// in the given project directory. Real files are left alone.
+func wipeSymlinks(projectClaude string) error {
+	for _, sub := range []string{"agents", "skills", "rules"} {
+		dir := filepath.Join(projectClaude, sub)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		for _, e := range entries {
+			p := filepath.Join(dir, e.Name())
+			info, err := os.Lstat(p)
+			if err != nil {
+				continue
+			}
+			// Only remove symlinks. Real files (project-local agents or
+			// rules a user may have dropped in) stay put.
+			if info.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(p)
+			}
+		}
+	}
+	return nil
+}
+
+func writeManifestFile(cwd string, m *TeamInstallsManifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

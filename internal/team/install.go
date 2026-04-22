@@ -37,21 +37,29 @@ type InstallResult struct {
 // Multi-team safe: when two installed teams declare an item with the same
 // name, the most recently installed one wins (symlink overwrite) with a
 // warning line. This mirrors npm / pip / gnu-stow semantics.
+//
+// `target` may be a short name, owner/repo shorthand, or a full URL. The
+// manifest entry will record the team's canonical name (from team.json), not
+// the user's input form, so subsequent commands like `atl remove <name>` and
+// `atl update <name>` work with the canonical name.
 func Install(target string, opts InstallOptions) (*InstallResult, error) {
 	resolved, regStatus, err := resolveAndSymlink(target, opts.CWD, opts.Verbose, true)
 	if err != nil {
 		return nil, err
 	}
 
-	// Write the manifest entry for this target (replacing any prior entry with the same name).
-	if err := writeManifestEntry(opts.CWD, target, resolved, regStatus); err != nil {
+	// Canonical team name comes from team.json (preserved in extendsChain[0] as "name@version").
+	canonicalName := canonicalNameFromChain(resolved.ExtendsChain)
+
+	// Write the manifest entry under the canonical name (replacing any prior entry with the same name).
+	if err := writeManifestEntry(opts.CWD, canonicalName, resolved, regStatus); err != nil {
 		return nil, err
 	}
 
 	// Build result.
 	topVersion := extractVersion(resolved.ExtendsChain)
 	return &InstallResult{
-		TopLevelName:    target,
+		TopLevelName:    canonicalName,
 		TopLevelVersion: topVersion,
 		Chain:           resolved.ExtendsChain,
 		AgentsCount:     len(resolved.Effective.Agents),
@@ -60,6 +68,22 @@ func Install(target string, opts InstallOptions) (*InstallResult, error) {
 		Excluded:        resolved.Excluded,
 		Status:          regStatus,
 	}, nil
+}
+
+// canonicalNameFromChain returns the team's canonical name from its extends
+// chain. The chain is "name@version" formatted, child-first, so element 0 is
+// the top-level team. Falls back to empty string if chain is empty.
+func canonicalNameFromChain(chain []string) string {
+	if len(chain) == 0 {
+		return ""
+	}
+	label := chain[0]
+	for i := 0; i < len(label); i++ {
+		if label[i] == '@' {
+			return label[:i]
+		}
+	}
+	return label
 }
 
 // resolveAndSymlink does the heavy lifting shared between public Install

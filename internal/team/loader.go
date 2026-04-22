@@ -27,13 +27,16 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 		return nil, "", err
 	}
 
-	// Derive a cache directory name from the team name (same as registry 'name' field).
-	cacheDir := config.TeamRepoDir(name)
+	// Derive a cache directory slug. For URLs / owner/repo forms, this extracts
+	// the team's repo name (last path segment, sans .git). For plain short names
+	// it returns the name as-is.
+	slug := slugFromInput(name)
+	cacheDir := config.TeamRepoDir(slug)
 
 	// If cached, git pull to stay current. If not, git clone.
 	if _, err := os.Stat(cacheDir); err == nil {
 		if l.Verbose {
-			fmt.Fprintf(os.Stderr, "  pulling %s...\n", name)
+			fmt.Fprintf(os.Stderr, "  pulling %s...\n", slug)
 		}
 		cmd := exec.Command("git", "-C", cacheDir, "pull", "--quiet")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -41,7 +44,7 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 		}
 	} else {
 		if l.Verbose {
-			fmt.Fprintf(os.Stderr, "  cloning %s from %s...\n", name, cloneURL)
+			fmt.Fprintf(os.Stderr, "  cloning %s from %s...\n", slug, cloneURL)
 		}
 		if err := os.MkdirAll(config.RepoCache(), 0o755); err != nil {
 			return nil, "", fmt.Errorf("mkdir cache: %w", err)
@@ -58,8 +61,10 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 		return nil, "", err
 	}
 
-	// Sanity: manifest name should match the requested name (unless we followed a URL).
-	if !isURL(name) && m.Name != name {
+	// Sanity: manifest name should match the requested name when user typed a short name.
+	// For URL / owner-repo inputs, we skip — the manifest's name is canonical and may
+	// differ from the URL slug (rare but legitimate).
+	if !isURL(name) && !strings.Contains(name, "/") && m.Name != name {
 		return nil, "", fmt.Errorf("manifest name %q in %s does not match requested %q", m.Name, cacheDir, name)
 	}
 
@@ -67,6 +72,26 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 	_ = constraint
 
 	return m, cacheDir, nil
+}
+
+// slugFromInput extracts the team slug from any input form atl install accepts:
+//
+//	"design-system-team"                                              → "design-system-team"
+//	"agentteamland/design-system-team"                                → "design-system-team"
+//	"https://github.com/agentteamland/design-system-team.git"         → "design-system-team"
+//	"https://github.com/agentteamland/design-system-team"             → "design-system-team"
+//	"git@github.com:agentteamland/design-system-team.git"             → "design-system-team"
+//	"ssh://git@github.com/agentteamland/design-system-team.git"       → "design-system-team"
+//
+// The slug is used as the cache directory name under ~/.claude/repos/agentteamland/.
+func slugFromInput(input string) string {
+	s := strings.TrimSpace(input)
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimRight(s, "/")
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
+	}
+	return s
 }
 
 // resolveURL turns a short name into a git URL. It tries:

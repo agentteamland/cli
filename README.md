@@ -83,31 +83,44 @@ cd cli
 ## Usage
 
 ```bash
-atl install <team>                   # registry lookup by name
-atl install agentteamland/<team>     # owner/repo shorthand (GitHub)
-atl install <https-git-url>          # direct URL (works for any host)
+# Five accepted install sources:
+atl install <team>                      # registry lookup by short name
+atl install <team>@^1.2.0               # with version constraint
+atl install agentteamland/<team>        # owner/repo shorthand (GitHub)
+atl install <https-or-ssh-git-url>      # direct URL (works for any host, public or private)
+atl install <local-filesystem-path>     # ./rel, /abs, ~/path, file://URL  (atl ≥ 0.1.4)
 
-atl list                             # show installed teams + effective counts
-atl remove <team>                    # unlinks symlinks; cached repo stays
-atl update [team]                    # pull updates; refresh all symlinks
-atl search <keyword>                 # search the public registry
+atl list                                # show installed teams + effective counts
+atl remove <team>                       # unlinks symlinks; cached repo stays
+atl update [team]                       # pull updates; refresh all symlinks
+atl search <keyword>                    # search the public registry
 atl --version
 atl --help
 ```
 
-Examples:
+### Examples
 
 ```bash
+# From the registry:
 atl install software-project-team
+atl install design-system-team@^0.4.0
 
-atl install starter-extended         # inherits software-project-team,
-                                     # adds stripe-agent, excludes ux-agent
+# Inheritance — starter-extended extends software-project-team:
+atl install starter-extended            # adds stripe-agent, excludes ux-agent
 
-atl list
-# ✓ starter-extended@0.1.0
-#    extends: software-project-team@1.0.0
-#    effective: 13 agents, 2 skills, 0 rules
+# Private team from GitHub:
+atl install git@github.com:your-org/your-team.git
+
+# Your own local team (no remote needed) — atl ≥ 0.1.4:
+cd ~/projects/my-team
+git init -b main && git add . && git commit -m "init"
+cd ~/projects/some-app
+atl install ~/projects/my-team          # absolute path
+atl install ./my-team                   # relative path
+atl install file:///Users/you/projects/my-team   # explicit file:// URL
 ```
+
+Full guide: [docs.agentteamland — Creating a team](https://agentteamland.github.io/docs/authoring/creating-a-team).
 
 ## How it works
 
@@ -123,10 +136,9 @@ Open a PR against [agentteamland/registry](https://github.com/agentteamland/regi
 
 ## Status
 
-**v0.1.0** — install, list, remove, update, search, registry name-resolution, unlimited-depth `extends` with `excludes` + override, circular detection.
+**Current: v0.1.4** — install/list/remove/update/search; registry name-resolution; unlimited-depth `extends` with `excludes` + override + circular detection; local-filesystem install (`./path`, `/abs/path`, `~/path`, `file://...`).
 
 **Roadmap:**
-- brew tap formula
 - `atl doctor` (diagnostics)
 - `atl team submit` (interactive registry PR)
 - `atl new-project` (team-scoped scaffolder dispatch)

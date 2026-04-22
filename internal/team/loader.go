@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/agentteamland/cli/internal/config"
@@ -94,14 +95,29 @@ func slugFromInput(input string) string {
 	return s
 }
 
-// resolveURL turns a short name into a git URL. It tries:
-// 1. If the input is a URL, use it directly.
-// 2. If the input is "owner/repo", expand to GitHub.
-// 3. Otherwise look up in the registry; if missing, fall back to "agentteamland/<name>".
+// resolveURL turns a short name into a git URL. It tries, in order:
+//  1. If the input is a URL (https/http/git@/ssh/file), use it directly.
+//  2. If the input points to an existing local directory, treat it as a local
+//     git source and return `file://<absolute-path>`. The directory must be a
+//     git repo (have a .git/ or be a bare repo) — `git clone` requires that.
+//  3. If the input is "owner/repo", expand to GitHub.
+//  4. Otherwise look up in the registry; if missing, fall back to
+//     "agentteamland/<name>".
 func (l *Loader) resolveURL(input string) (string, error) {
 	if isURL(input) {
 		return input, nil
 	}
+
+	// Local-filesystem path — "./team", "../team", "/abs/path/team", or a bare
+	// "my-team" that happens to exist as a directory in cwd.
+	if isLocalPath(input) {
+		abs, err := filepath.Abs(input)
+		if err != nil {
+			return "", fmt.Errorf("local path %q: %w", input, err)
+		}
+		return "file://" + abs, nil
+	}
+
 	if strings.Count(input, "/") == 1 && !strings.ContainsAny(input, " @") {
 		return "https://github.com/" + input + ".git", nil
 	}
@@ -122,5 +138,38 @@ func isURL(s string) bool {
 	return strings.HasPrefix(s, "https://") ||
 		strings.HasPrefix(s, "http://") ||
 		strings.HasPrefix(s, "git@") ||
-		strings.HasPrefix(s, "ssh://")
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "file://")
+}
+
+// isLocalPath reports whether the input looks like a local filesystem path
+// AND that path currently exists as a directory. Accepts absolute paths
+// ("/abs/path"), explicit relative paths ("./x", "../x"), or bare names that
+// happen to resolve to an existing directory in cwd.
+//
+// We check filesystem existence — not just pattern — so bare names like
+// "my-team" still fall through to registry lookup unless a directory with
+// that name actually sits next to the user's cwd.
+func isLocalPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	// Absolute paths or explicit relatives are unambiguously paths.
+	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "~/") {
+		expanded := s
+		if strings.HasPrefix(s, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				expanded = filepath.Join(home, s[2:])
+			}
+		}
+		info, err := os.Stat(expanded)
+		return err == nil && info.IsDir()
+	}
+	// Bare token — check only if it contains no slash (slash = owner/repo form).
+	// For "my-team" with no slashes, check if ./my-team exists and is a dir.
+	if !strings.Contains(s, "/") {
+		info, err := os.Stat(s)
+		return err == nil && info.IsDir()
+	}
+	return false
 }

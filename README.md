@@ -93,7 +93,14 @@ atl install <local-filesystem-path>     # ./rel, /abs, ~/path, file://URL  (atl 
 atl list                                # show installed teams + effective counts
 atl remove <team>                       # unlinks symlinks; cached repo stays
 atl update [team]                       # pull updates; refresh all symlinks
+atl update --silent-if-clean            # hook-friendly: no output if nothing changed
+atl update --check-only                 # dry-run: what WOULD update
+atl update --throttle=30m               # skip if last run <30m ago
 atl search <keyword>                    # search the public registry
+atl setup-hooks                         # install Claude Code hooks so update checks
+                                        # run automatically on session start and every
+                                        # prompt (30m throttle, idempotent)    (atl ≥ 0.1.5)
+atl setup-hooks --remove                # uninstall the hooks
 atl --version
 atl --help
 ```
@@ -118,6 +125,12 @@ cd ~/projects/some-app
 atl install ~/projects/my-team          # absolute path
 atl install ./my-team                   # relative path
 atl install file:///Users/you/projects/my-team   # explicit file:// URL
+
+# Stay current without manual intervention — atl ≥ 0.1.5:
+atl setup-hooks                         # Claude Code auto-checks on every session + every
+                                        # prompt (30m throttled). Your teammates who run
+                                        # `atl install <team>` once are auto-updated
+                                        # every time you ship a new version.
 ```
 
 Full guide: [docs.agentteamland — Creating a team](https://agentteamland.github.io/docs/authoring/creating-a-team).
@@ -136,7 +149,16 @@ Open a PR against [agentteamland/registry](https://github.com/agentteamland/regi
 
 ## Status
 
-**Current: v0.1.4** — install/list/remove/update/search; registry name-resolution; unlimited-depth `extends` with `excludes` + override + circular detection; local-filesystem install (`./path`, `/abs/path`, `~/path`, `file://...`).
+**Current: v0.1.5** — everything in v0.1.4 plus hook-driven auto-update:
+  - `atl setup-hooks` writes Claude Code SessionStart + UserPromptSubmit hooks
+  - `atl update --silent-if-clean --throttle=<dur>` (hook-friendly; fast-path 1ms, slow-path every throttle window)
+  - `atl update` now iterates every cached repo under `~/.claude/repos/agentteamland/` (teams AND globals: core / brainstorm / rule / team-manager), in parallel
+  - atl binary self-check against GitHub Releases (throttled to 24h); prints `⬆ atl X → Y available — run: brew upgrade atl` when outdated
+  - First-install opt-in prompt for the auto-update hooks
+
+**v0.1.4** — local-filesystem install (`./path`, `/abs/path`, `~/path`, `file://...`).
+
+**v0.1.x baseline** — install / list / remove / update / search; registry name-resolution; unlimited-depth `extends` with `excludes` + override + circular detection.
 
 **Roadmap:**
 - `atl doctor` (diagnostics)

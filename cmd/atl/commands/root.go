@@ -38,6 +38,7 @@ Docs:     https://github.com/agentteamland`,
 		NewRemove(),
 		NewUpdate(),
 		NewSearch(),
+		NewSetupHooks(),
 	)
 
 	return root

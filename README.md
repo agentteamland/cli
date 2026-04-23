@@ -49,18 +49,32 @@ brew tap agentteamland/tap
 brew install atl
 ```
 
-### Windows (Scoop — recommended)
+### Windows (PowerShell one-liner — recommended)
+
+```powershell
+irm https://raw.githubusercontent.com/agentteamland/cli/main/scripts/install.ps1 | iex
+```
+
+Downloads the latest `atl.exe`, installs it to `%LOCALAPPDATA%\Programs\atl\`, adds that directory to your user PATH, and verifies the install. Zero admin rights, zero package-manager prerequisites, works from a fresh Windows machine.
+
+### Windows (Scoop)
+
+For users who already have scoop:
 
 ```powershell
 scoop bucket add agentteamland https://github.com/agentteamland/scoop-bucket
 scoop install atl
 ```
 
-### Windows (winget — after first Microsoft review completes)
+Don't have scoop? The PowerShell one-liner above is simpler — no need to install a package manager first.
+
+### Windows (winget — coming when Microsoft review completes)
 
 ```powershell
 winget install agentteamland.atl
 ```
+
+Currently winget ships `atl` 0.1.1 (first Microsoft review is pending). Use the PowerShell one-liner or scoop to get the latest release until the winget catalog catches up.
 
 ### One-liner fallback (macOS / Linux)
 
@@ -68,9 +82,9 @@ winget install agentteamland.atl
 curl -fsSL https://raw.githubusercontent.com/agentteamland/cli/main/scripts/install.sh | sh
 ```
 
-### Manual
+### Manual (any platform)
 
-Download the latest release for your platform from [releases](https://github.com/agentteamland/cli/releases), extract, and move the binary into your `$PATH`.
+Download the latest release for your platform from [releases](https://github.com/agentteamland/cli/releases), extract, and move the binary into your `$PATH`. On Windows, the Releases page has `atl_*_windows_{amd64,arm64}.zip` artifacts — extract the `atl.exe` inside to any folder on your PATH.
 
 ### Build from source (no Go on host)
 

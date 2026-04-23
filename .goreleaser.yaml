@@ -36,6 +36,23 @@ archives:
       - README.md
       - LICENSE
 
+# MSI installer — planned, not yet shipped.
+# Why not now: wixl (the Linux-based MSI generator) produces binaries we can't
+# test end-to-end on macOS. Shipping an unverified MSI risks another
+# goreleaser CI failure and emails. Plan:
+#   1. A Windows teammate runs a local wixl build once using scripts/msi/atl.wxs
+#      (to be written) and verifies the resulting MSI installs + adds to PATH +
+#      uninstalls cleanly.
+#   2. Re-enable this block, CI apt-installs msitools, MSI ships on each tag.
+# Until then, Windows users install via scripts/install.ps1 one-liner (zero
+# package-manager prerequisites) or scoop / winget (once winget PR merges).
+#
+# msi:
+#   - id: atl-msi
+#     name: "atl_{{ .Version }}_windows_{{ .Arch }}"
+#     ids: [atl]
+#     wxs: ./scripts/msi/atl.wxs
+
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
 

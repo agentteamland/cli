@@ -31,7 +31,7 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]        # goreleaser v2: plural 'formats' replaces singular 'format'
     files:
       - README.md
       - LICENSE
@@ -40,7 +40,7 @@ checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"   # renamed from name_template in goreleaser v2
 
 # Homebrew tap — publishes a formula to agentteamland/homebrew-tap on each tag.
 brews:
@@ -80,9 +80,24 @@ scoops:
       email: noreply@agentteamland.com
     commit_msg_template: "chore: bump atl to {{ .Tag }}"
 
-# Winget — opens a PR to microsoft/winget-pkgs from our fork on each tag.
-# First submission requires Microsoft review (~1-2 weeks). Subsequent updates
-# auto-merge faster once publisher is trusted.
+# Winget — pushes manifest updates to agentteamland/winget-pkgs (our fork of
+# microsoft/winget-pkgs) on each tag. We do NOT auto-open the PR to
+# microsoft/winget-pkgs from CI; that step has historically failed with a
+# 403 ("Resource not accessible by personal access token") because creating
+# cross-fork PRs requires a PAT scope we don't want to grant to CI.
+#
+# The manifest is ready-to-go in agentteamland/winget-pkgs; when we want to
+# publish a new version on winget, we open the PR manually (or via gh CLI
+# from a local terminal where we're logged in). This is acceptable for now
+# — winget publishing cadence is coarser than brew/scoop anyway, and the
+# first Microsoft review has to clear before auto-updates matter.
+#
+# To re-enable automatic PR creation later:
+#   1. Provision a PAT with `public_repo` scope (classic PAT) or fine-grained
+#      with PR creation on microsoft/winget-pkgs (note: Microsoft does not
+#      grant fine-grained access to their repo, so classic PAT is the path)
+#   2. Store as TAP_GITHUB_TOKEN or a new WINGET_PR_TOKEN secret
+#   3. Flip `pull_request.enabled` back to true
 winget:
   - name: atl
     publisher: agentteamland
@@ -110,11 +125,7 @@ winget:
       branch: "atl-{{ .Version }}"
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
       pull_request:
-        enabled: true
-        base:
-          owner: microsoft
-          name: winget-pkgs
-          branch: master
+        enabled: false        # Re-enable once we have a PAT with PR-creation scope on microsoft/winget-pkgs
 
 changelog:
   sort: asc

@@ -68,13 +68,13 @@ scoop install atl
 
 Don't have scoop? The PowerShell one-liner above is simpler — no need to install a package manager first.
 
-### Windows (winget — coming when Microsoft review completes)
+### Windows (winget)
 
 ```powershell
 winget install agentteamland.atl
 ```
 
-Currently winget ships `atl` 0.1.1 (first Microsoft review is pending). Use the PowerShell one-liner or scoop to get the latest release until the winget catalog catches up.
+Available in the Microsoft winget catalog since 2026-04-24. Note that winget may lag one or two releases behind the latest `v*` tag — there is a manual review step on every submission to `microsoft/winget-pkgs`. If you need the absolute latest release, use the PowerShell one-liner or scoop above.
 
 ### One-liner fallback (macOS / Linux)
 

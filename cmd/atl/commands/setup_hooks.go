@@ -13,15 +13,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewSetupHooks builds the `atl setup-hooks` command — writes the Claude Code
-// SessionStart + UserPromptSubmit hooks into ~/.claude/settings.json so that
-// `atl update --silent-if-clean` runs automatically:
+// NewSetupHooks builds the `atl setup-hooks` command — writes four Claude Code
+// hooks into ~/.claude/settings.json:
 //
-//   - at every new session start (immediately catches updates)
-//   - on every user prompt (throttled to once per <duration>)
+//   - SessionStart     → atl update --silent-if-clean
+//                        (auto-update check at every new session start)
+//   - UserPromptSubmit → atl update --silent-if-clean --throttle=<duration>
+//                        (auto-update check per message, throttled)
+//   - SessionEnd       → atl learning-capture --silent-if-empty
+//                        (scans transcript for <!-- learning --> markers
+//                         and prepares save-learnings work when found)
+//   - PreCompact       → atl learning-capture --silent-if-empty
+//                        (same scanner, before context compaction — catches
+//                         learnings that would otherwise be summarized away)
 //
 // The merge is idempotent: re-running the command replaces only the atl-owned
-// hook entries, preserving any other hooks the user has configured.
+// hook entries (any command starting with "atl "), preserving any other hooks
+// the user has configured.
 func NewSetupHooks() *cobra.Command {
 	var (
 		remove   bool
@@ -30,24 +38,26 @@ func NewSetupHooks() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "setup-hooks",
-		Short: "Configure Claude Code hooks to auto-check for updates on every session + every message (throttled)",
-		Long: `Configure automatic update checks via Claude Code hooks.
+		Short: "Configure Claude Code hooks for auto-update + learning capture",
+		Long: `Configure atl automation via Claude Code hooks.
 
-Installs two hooks into ~/.claude/settings.json:
+Installs four hooks into ~/.claude/settings.json:
 
   - SessionStart      → atl update --silent-if-clean
-                        (runs once every time a Claude Code session starts)
+                        (auto-update every repo in ~/.claude/repos/agentteamland/)
   - UserPromptSubmit  → atl update --silent-if-clean --throttle=<duration>
-                        (runs on every message, but throttled — default 30m —
-                         so cost per message is a microsecond unless the
-                         throttle has expired)
+                        (throttled auto-update, default 30m)
+  - SessionEnd        → atl learning-capture --silent-if-empty
+                        (scans transcript for <!-- learning --> markers;
+                         silent when no markers present — zero cost)
+  - PreCompact        → atl learning-capture --silent-if-empty
+                        (same scanner, runs before context compaction
+                         so markers are not lost to summarization)
 
-When a new team / core / atl release is available, a single line like
-  🔄 software-project-team 1.1.1 → 1.1.2 (auto-updated)
-shows up in your terminal AND in Claude's context. Sessions stay fresh
-without you having to run 'atl update' manually.
+When updates or markers are detected, a short report shows up in your
+terminal AND in Claude's context. Empty sessions stay silent (free).
 
-The merge is idempotent: re-running replaces only the atl-owned entries.
+The merge is idempotent: re-running replaces only atl-owned entries.
 Other hooks you have are preserved. Pass --remove to uninstall.
 
 The file edited is ~/.claude/settings.json.`,
@@ -72,9 +82,17 @@ The file edited is ~/.claude/settings.json.`,
 	return cmd
 }
 
-// atlCmdTag is the unique prefix we use to identify atl-owned hook entries so
-// we can safely update/remove them without touching the user's other hooks.
-const atlCmdTag = "atl update --silent-if-clean"
+// atlCmdPrefix is the broad prefix we use to identify atl-owned hook entries.
+// Any hook command starting with "atl " is considered atl-owned and will be
+// replaced/removed by setup-hooks. This keeps the upsert idempotent across
+// multiple atl subcommands (update, learning-capture, and any future additions)
+// without requiring a separate tag per command.
+const atlCmdPrefix = "atl "
+
+// atlHookEvents is the full set of Claude Code hook events atl installs into.
+// Keep this list in sync with the setters in runSetupHooks; removal uses it
+// to clean every possible event we could have written to.
+var atlHookEvents = []string{"SessionStart", "UserPromptSubmit", "SessionEnd", "PreCompact"}
 
 func runSetupHooks(throttle string) error {
 	settingsPath := filepath.Join(config.ClaudeHome(), "settings.json")
@@ -85,20 +103,30 @@ func runSetupHooks(throttle string) error {
 
 	hooks := ensureMap(obj, "hooks")
 
-	setSessionStart(hooks, "atl update --silent-if-clean")
-	setUserPromptSubmit(hooks, fmt.Sprintf("atl update --silent-if-clean --throttle=%s", throttle))
+	updateCmd := "atl update --silent-if-clean"
+	updateThrottledCmd := fmt.Sprintf("atl update --silent-if-clean --throttle=%s", throttle)
+	captureCmd := "atl learning-capture --silent-if-empty"
+
+	upsertEventEntry(hooks, "SessionStart", updateCmd)
+	upsertEventEntry(hooks, "UserPromptSubmit", updateThrottledCmd)
+	upsertEventEntry(hooks, "SessionEnd", captureCmd)
+	upsertEventEntry(hooks, "PreCompact", captureCmd)
 
 	if err := writeSettingsJSON(settingsPath, obj); err != nil {
 		return err
 	}
 
-	color.Green("✓ atl auto-update hooks installed")
+	color.Green("✓ atl hooks installed")
 	fmt.Println()
-	fmt.Printf("  SessionStart     → %s\n", "atl update --silent-if-clean")
-	fmt.Printf("  UserPromptSubmit → atl update --silent-if-clean --throttle=%s\n", throttle)
+	fmt.Printf("  SessionStart     → %s\n", updateCmd)
+	fmt.Printf("  UserPromptSubmit → %s\n", updateThrottledCmd)
+	fmt.Printf("  SessionEnd       → %s\n", captureCmd)
+	fmt.Printf("  PreCompact       → %s\n", captureCmd)
 	fmt.Println()
 	fmt.Println("Edited: " + settingsPath)
-	fmt.Println("Teams + core + brainstorm + rule + team-manager + atl binary are now auto-checked.")
+	fmt.Println("Auto-update: teams + core + brainstorm + rule + team-manager + atl binary.")
+	fmt.Println("Learning capture: inline <!-- learning --> markers are collected at")
+	fmt.Println("session end and before context compaction. Zero cost when no markers.")
 	fmt.Println("Remove at any time with: atl setup-hooks --remove")
 	return nil
 }
@@ -121,7 +149,7 @@ func runRemoveHooks() error {
 	}
 
 	removed := false
-	for _, event := range []string{"SessionStart", "UserPromptSubmit"} {
+	for _, event := range atlHookEvents {
 		if cleanEventEntries(hooks, event) {
 			removed = true
 		}
@@ -137,7 +165,7 @@ func runRemoveHooks() error {
 	}
 
 	if removed {
-		color.Green("✓ atl auto-update hooks removed from %s", settingsPath)
+		color.Green("✓ atl hooks removed from %s", settingsPath)
 	} else {
 		fmt.Println("No atl-owned hooks found; settings.json unchanged.")
 	}
@@ -199,14 +227,6 @@ func writeSettingsJSON(path string, obj map[string]interface{}) error {
 // groups. Each group has a "hooks" array containing command entries. For our
 // purposes we treat our auto-update check as its own matcher group.
 
-func setSessionStart(hooks map[string]interface{}, command string) {
-	upsertEventEntry(hooks, "SessionStart", command)
-}
-
-func setUserPromptSubmit(hooks map[string]interface{}, command string) {
-	upsertEventEntry(hooks, "UserPromptSubmit", command)
-}
-
 // upsertEventEntry adds or replaces the atl-owned matcher group in hooks[event].
 // Preserves all other matcher groups in that event.
 func upsertEventEntry(hooks map[string]interface{}, event, command string) {
@@ -259,7 +279,9 @@ func cleanEventEntries(hooks map[string]interface{}, event string) bool {
 }
 
 // isAtlGroup reports whether a matcher group's inner command starts with our
-// tag — our marker for "this hook was installed by atl".
+// prefix — our marker for "this hook was installed by atl". Any command
+// beginning with "atl " (update, learning-capture, or future subcommands) is
+// considered atl-owned and will be replaced/removed by setup-hooks.
 func isAtlGroup(g interface{}) bool {
 	grpMap, ok := g.(map[string]interface{})
 	if !ok {
@@ -272,7 +294,7 @@ func isAtlGroup(g interface{}) bool {
 			continue
 		}
 		if t, ok := hMap["type"].(string); ok && t == "command" {
-			if cmd, ok := hMap["command"].(string); ok && strings.HasPrefix(cmd, atlCmdTag) {
+			if cmd, ok := hMap["command"].(string); ok && strings.HasPrefix(cmd, atlCmdPrefix) {
 				return true
 			}
 		}

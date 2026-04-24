@@ -39,6 +39,7 @@ Docs:     https://github.com/agentteamland`,
 		NewUpdate(),
 		NewSearch(),
 		NewSetupHooks(),
+		NewLearningCapture(),
 	)
 
 	return root

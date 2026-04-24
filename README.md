@@ -111,10 +111,14 @@ atl update --silent-if-clean            # hook-friendly: no output if nothing ch
 atl update --check-only                 # dry-run: what WOULD update
 atl update --throttle=30m               # skip if last run <30m ago
 atl search <keyword>                    # search the public registry
-atl setup-hooks                         # install Claude Code hooks so update checks
-                                        # run automatically on session start and every
-                                        # prompt (30m throttle, idempotent)    (atl ≥ 0.1.5)
+atl setup-hooks                         # install Claude Code hooks for auto-update +
+                                        # learning capture (4 hooks: SessionStart,
+                                        # UserPromptSubmit, SessionEnd, PreCompact;
+                                        # idempotent, opt-in)                   (atl ≥ 0.2.0)
 atl setup-hooks --remove                # uninstall the hooks
+atl learning-capture --silent-if-empty  # scan session transcript for <!-- learning -->
+                                        # markers and print a report; hook-driven,
+                                        # silent when no markers found           (atl ≥ 0.2.0)
 atl --version
 atl --help
 ```
@@ -163,19 +167,25 @@ Open a PR against [agentteamland/registry](https://github.com/agentteamland/regi
 
 ## Status
 
-**Current: v0.1.5** — everything in v0.1.4 plus hook-driven auto-update:
-  - `atl setup-hooks` writes Claude Code SessionStart + UserPromptSubmit hooks
-  - `atl update --silent-if-clean --throttle=<dur>` (hook-friendly; fast-path 1ms, slow-path every throttle window)
-  - `atl update` now iterates every cached repo under `~/.claude/repos/agentteamland/` (teams AND globals: core / brainstorm / rule / team-manager), in parallel
-  - atl binary self-check against GitHub Releases (throttled to 24h); prints `⬆ atl X → Y available — run: brew upgrade atl` when outdated
-  - First-install opt-in prompt for the auto-update hooks
+**Current: v0.2.0** — everything in v0.1.5 plus learning-capture automation:
+  - **`atl learning-capture`** — new command that scans the Claude Code session transcript for inline `<!-- learning -->` markers and reports what was found. Silent when no markers; produces a short report when markers exist so `/save-learnings` can process them into wiki + memory + doc drafts.
+  - **`atl setup-hooks` now installs four hooks** (up from two):
+    - `SessionStart` → `atl update --silent-if-clean`
+    - `UserPromptSubmit` → `atl update --silent-if-clean --throttle=30m`
+    - `SessionEnd` → `atl learning-capture --silent-if-empty`
+    - `PreCompact` → `atl learning-capture --silent-if-empty`
+  - Boring sessions stay free: learning-capture exits silently when no markers are found — zero tokens, zero noise.
+  - Marker-aware `/save-learnings --from-markers` only re-analyzes marked regions of the transcript, not the full conversation. Cheaper than manual save-learnings and more reliable (nothing gets forgotten).
+  - Paired with two new core rules: `learning-capture` (inline marker protocol) and `docs-sync` (proactive README / doc-site updates in the same turn as user-facing changes). Ship in `core@1.3.0`.
+
+**v0.1.5** — hook-driven auto-update (`atl setup-hooks`, SessionStart + UserPromptSubmit, throttled self-check).
 
 **v0.1.4** — local-filesystem install (`./path`, `/abs/path`, `~/path`, `file://...`).
 
 **v0.1.x baseline** — install / list / remove / update / search; registry name-resolution; unlimited-depth `extends` with `excludes` + override + circular detection.
 
 **Roadmap:**
-- `atl doctor` (diagnostics)
+- `atl doctor` (diagnostics — includes wiki / docs-sync lint)
 - `atl team submit` (interactive registry PR)
 - `atl new-project` (team-scoped scaffolder dispatch)
 - Version-constraint enforcement (caret/tilde/exact)

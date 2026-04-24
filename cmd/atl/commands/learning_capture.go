@@ -75,10 +75,10 @@ This is the "capture half" of the learning-capture rule pair (see
 
 // Marker is a parsed <!-- learning ... --> block extracted from the transcript.
 type Marker struct {
-	Topic      string
-	Kind       string
-	DocImpact  string
-	Body       string
+	Topic     string
+	Kind      string
+	DocImpact string
+	Body      string
 }
 
 // runLearningCapture is the command entry point. Resolves the transcript path

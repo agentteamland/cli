@@ -17,15 +17,15 @@ import (
 // hooks into ~/.claude/settings.json:
 //
 //   - SessionStart     → atl update --silent-if-clean
-//                        (auto-update check at every new session start)
+//     (auto-update check at every new session start)
 //   - UserPromptSubmit → atl update --silent-if-clean --throttle=<duration>
-//                        (auto-update check per message, throttled)
+//     (auto-update check per message, throttled)
 //   - SessionEnd       → atl learning-capture --silent-if-empty
-//                        (scans transcript for <!-- learning --> markers
-//                         and prepares save-learnings work when found)
+//     (scans transcript for <!-- learning --> markers
+//     and prepares save-learnings work when found)
 //   - PreCompact       → atl learning-capture --silent-if-empty
-//                        (same scanner, before context compaction — catches
-//                         learnings that would otherwise be summarized away)
+//     (same scanner, before context compaction — catches
+//     learnings that would otherwise be summarized away)
 //
 // The merge is idempotent: re-running the command replaces only the atl-owned
 // hook entries (any command starting with "atl "), preserving any other hooks

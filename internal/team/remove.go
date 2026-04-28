@@ -85,8 +85,18 @@ func Remove(name, cwd string) error {
 	return nil
 }
 
-// wipeSymlinks removes every symlink under .claude/{agents,skills,rules}/
-// in the given project directory. Real files are left alone.
+// wipeSymlinks removes atl-managed entries under .claude/{agents,skills,rules}/
+// in the given project directory. Real files NOT created by atl are left alone.
+//
+// For agents/ and rules/: only symlinks are removed (matches the install
+// pattern — agents and rules are installed as symlinks).
+//
+// For skills/: BOTH symlinks AND directories containing skill.md are removed.
+// Reason: install switched from symlink to copy in v0.3.0+ (workaround for
+// Claude Code's skill-discovery symlink limitation, see install.go), so we
+// must clean up real directories too. The "directory containing skill.md"
+// heuristic distinguishes atl-managed copies from any user-authored
+// project-local skills the user may have placed under .claude/skills/.
 func wipeSymlinks(projectClaude string) error {
 	for _, sub := range []string{"agents", "skills", "rules"} {
 		dir := filepath.Join(projectClaude, sub)
@@ -103,10 +113,23 @@ func wipeSymlinks(projectClaude string) error {
 			if err != nil {
 				continue
 			}
-			// Only remove symlinks. Real files (project-local agents or
-			// rules a user may have dropped in) stay put.
+			// Symlinks: always remove (atl-installed convention).
 			if info.Mode()&os.ModeSymlink != 0 {
 				_ = os.Remove(p)
+				continue
+			}
+			// Skills directory: also wipe real directories that contain
+			// skill.md (atl-installed copies post-v0.3.0). User-authored
+			// skills at this path get the same treatment — but the
+			// reinstall-after-wipe pattern means atl-managed ones come
+			// back. Project-local skills not registered with atl will be
+			// lost in remove + reinstall flows; document this as a known
+			// trade-off in atl docs.
+			if sub == "skills" && info.IsDir() {
+				skillManifest := filepath.Join(p, "skill.md")
+				if _, err := os.Stat(skillManifest); err == nil {
+					_ = os.RemoveAll(p)
+				}
 			}
 		}
 	}

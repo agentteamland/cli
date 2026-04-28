@@ -3,6 +3,7 @@ package team
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -152,6 +153,23 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 			return nil, "", fmt.Errorf("symlink agent %s: %w", a.Name, err)
 		}
 	}
+	// Skills are COPIED, not symlinked. Claude Code's project-level skill
+	// loader does not follow symlinks under .claude/skills/ — symlinked
+	// skills exist on disk but are absent from the Skill tool's discovery
+	// list (returns "Unknown skill" on invocation). Symlinks ARE followed
+	// at runtime when reading the skill body, but the validation/discovery
+	// pass that builds the available-skills list does not resolve them.
+	// See upstream issues anthropics/claude-code#14836, #25367, #37590.
+	//
+	// Workaround: copy the skill directory into the project. Trade-off:
+	// `atl update` only refreshes the cached source — projects with copied
+	// skills become stale. To pick up updates, re-run `atl install <team>`
+	// in the project, which re-executes resolveAndSymlink and re-copies
+	// the latest cached content.
+	//
+	// Agents and rules continue to be symlinked: agents are read at
+	// runtime by file path (symlinks transparent), and .claude/rules/
+	// supports symlink discovery in Claude Code (per upstream behavior).
 	for _, s := range resolved.Effective.Skills {
 		src := filepath.Join(config.TeamRepoDir(s.SourceTeam), "skills", s.Name)
 		if _, err := os.Stat(src); err != nil {
@@ -159,9 +177,11 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 		}
 		dst := filepath.Join(projectClaude, "skills", s.Name)
 		maybeWarnCollision(warnCollisions, existingOwnership, "skill", s.Name, target)
-		_ = os.Remove(dst)
-		if err := os.Symlink(src, dst); err != nil {
-			return nil, "", fmt.Errorf("symlink skill %s: %w", s.Name, err)
+		// RemoveAll handles both prior symlinks (old install) and prior
+		// copy directories (re-install), keeping the operation idempotent.
+		_ = os.RemoveAll(dst)
+		if err := copySkillDir(src, dst); err != nil {
+			return nil, "", fmt.Errorf("copy skill %s: %w", s.Name, err)
 		}
 	}
 	for _, r := range resolved.Effective.Rules {
@@ -178,6 +198,58 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 	}
 
 	return resolved, regStatus, nil
+}
+
+// copySkillDir does a recursive file copy from src to dst. Used for skill
+// directory installation (Claude Code skill loader doesn't follow symlinks
+// under .claude/skills/, so we materialize real files).
+//
+// Skills are small (typically a single skill.md, occasionally with a few
+// supporting files), so a simple synchronous walk is appropriate. We do not
+// preserve symlinks within the source tree — every path inside src is
+// resolved and copied as a real file.
+func copySkillDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("skill source is not a directory: %s", src)
+	}
+	if err := os.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
+		return err
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			if rel == "." {
+				return nil
+			}
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		// Regular file (or symlink — resolved by os.Open below).
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		if _, err := io.Copy(out, in); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // ownedEntry is a reverse-lookup: which installed team currently owns a given

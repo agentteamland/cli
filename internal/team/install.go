@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/agentteamland/cli/internal/checksum"
 	"github.com/agentteamland/cli/internal/config"
 	"github.com/agentteamland/cli/internal/registry"
 	"github.com/agentteamland/cli/internal/resolver"
@@ -345,15 +346,24 @@ type TeamInstallsManifest struct {
 }
 
 // InstalledTeam records one installed team's effective state.
+//
+// InstalledChecksums is keyed by resource kind ("agents" / "skills" /
+// "rules"), then by item name; values are hex-encoded SHA-256 hashes of the
+// content as installed. Used by `atl update` to detect modified copies
+// (skip refresh) vs. unmodified copies (safe to overwrite with the fresh
+// global-cache version). The field is `omitempty` for backwards compatibility
+// with manifests written by older atl versions; missing values are treated
+// as "unknown — don't auto-refresh", protecting against accidental data loss.
 type InstalledTeam struct {
-	Name         string              `json:"name"`
-	Repo         string              `json:"repo"`
-	Version      string              `json:"version"`
-	InstalledAt  string              `json:"installedAt"`
-	SourceDir    string              `json:"sourceDir"`
-	ExtendsChain []string            `json:"extendsChain"`
-	Effective    map[string][]string `json:"effective"`
-	Status       string              `json:"status,omitempty"`
+	Name               string                       `json:"name"`
+	Repo               string                       `json:"repo"`
+	Version            string                       `json:"version"`
+	InstalledAt        string                       `json:"installedAt"`
+	SourceDir          string                       `json:"sourceDir"`
+	ExtendsChain       []string                     `json:"extendsChain"`
+	Effective          map[string][]string          `json:"effective"`
+	Status             string                       `json:"status,omitempty"`
+	InstalledChecksums map[string]map[string]string `json:"installedChecksums,omitempty"`
 }
 
 func writeManifestEntry(cwd, topName string, resolved *resolver.Resolved, status string) error {
@@ -388,15 +398,24 @@ func writeManifestEntry(cwd, topName string, resolved *resolver.Resolved, status
 		"rules":  itemNames(resolved.Effective.Rules),
 	}
 
+	// Record install-time content checksums for each resource. These drive
+	// the modified-detection used by `atl update` to decide refresh vs.
+	// skip per project copy. Hashing the source (global cache) is
+	// equivalent to hashing the just-written destination because copy is
+	// byte-identical; source is more convenient since the path is already
+	// derivable from `resolved`.
+	checksums := computeInstallChecksums(resolved)
+
 	filtered = append(filtered, InstalledTeam{
-		Name:         topName,
-		Repo:         "", // Populated from resolved URL in a future version.
-		Version:      extractVersion(resolved.ExtendsChain),
-		InstalledAt:  installedAt,
-		SourceDir:    "~/.claude/repos/agentteamland/" + topName,
-		ExtendsChain: resolved.ExtendsChain,
-		Effective:    eff,
-		Status:       status,
+		Name:               topName,
+		Repo:               "", // Populated from resolved URL in a future version.
+		Version:            extractVersion(resolved.ExtendsChain),
+		InstalledAt:        installedAt,
+		SourceDir:          "~/.claude/repos/agentteamland/" + topName,
+		ExtendsChain:       resolved.ExtendsChain,
+		Effective:          eff,
+		Status:             status,
+		InstalledChecksums: checksums,
 	})
 	m.Teams = filtered
 
@@ -414,6 +433,39 @@ func itemNames(items []resolver.ResolvedItem) []string {
 	out := make([]string, len(items))
 	for i, it := range items {
 		out[i] = it.Name
+	}
+	return out
+}
+
+// computeInstallChecksums hashes every resolved resource (agent, skill, rule)
+// from its global-cache source path. The result is keyed by kind, then by
+// item name, with hex-encoded SHA-256 values. Failures (unreadable files,
+// missing source) cause the affected entry to be omitted; the user later
+// sees "unknown checksum" treated as "modified" by the auto-refresh path,
+// which conservatively skips refresh rather than risk overwriting.
+func computeInstallChecksums(resolved *resolver.Resolved) map[string]map[string]string {
+	out := map[string]map[string]string{
+		"agents": {},
+		"skills": {},
+		"rules":  {},
+	}
+	for _, a := range resolved.Effective.Agents {
+		src := filepath.Join(config.TeamRepoDir(a.SourceTeam), "agents", a.Name, "agent.md")
+		if h, err := checksum.FileSHA256(src); err == nil {
+			out["agents"][a.Name] = h
+		}
+	}
+	for _, s := range resolved.Effective.Skills {
+		src := filepath.Join(config.TeamRepoDir(s.SourceTeam), "skills", s.Name)
+		if h, err := checksum.DirSHA256(src); err == nil {
+			out["skills"][s.Name] = h
+		}
+	}
+	for _, r := range resolved.Effective.Rules {
+		src := filepath.Join(config.TeamRepoDir(r.SourceTeam), "rules", r.Name+".md")
+		if h, err := checksum.FileSHA256(src); err == nil {
+			out["rules"][r.Name] = h
+		}
 	}
 	return out
 }

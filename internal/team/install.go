@@ -140,7 +140,26 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 		}
 	}
 
-	// Materialize symlinks.
+	// Materialize project copies.
+	//
+	// All three resource kinds (agents, skills, rules) are now COPIED into the
+	// project's .claude/ tree. This unified copy paradigm replaces the earlier
+	// mixed model (skills copied since v0.3.0, agents + rules symlinked).
+	//
+	// Why fully self-contained: when self-updating-learning-loop ships,
+	// /save-learnings can mutate agent + rule files (auto-grown children/,
+	// learnings/, KB section rebuilds, identity proposals). Symlinks would
+	// route those writes back to the global cache at
+	// ~/.claude/repos/agentteamland/{team}/, where the user has no push
+	// permission and the next `atl update` would collide on git pull.
+	// Project-local copies isolate mutations cleanly. See:
+	// .claude/docs/install-mechanism-redesign.md (Q1).
+	//
+	// Trade-off: copies become stale relative to the global cache. Compensated
+	// by `atl update`'s auto-refresh-of-unmodified-projects step (Q3),
+	// shipping in a follow-up PR. Until then, users on this PR refresh
+	// manually with `atl install <team> --refresh` (after Q4 ships) or by
+	// re-running `atl install <team>` (current behavior).
 	for _, a := range resolved.Effective.Agents {
 		src := filepath.Join(config.TeamRepoDir(a.SourceTeam), "agents", a.Name, "agent.md")
 		if _, err := os.Stat(src); err != nil {
@@ -148,28 +167,13 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 		}
 		dst := filepath.Join(projectClaude, "agents", a.Name+".md")
 		maybeWarnCollision(warnCollisions, existingOwnership, "agent", a.Name, target)
-		_ = os.Remove(dst)
-		if err := os.Symlink(src, dst); err != nil {
-			return nil, "", fmt.Errorf("symlink agent %s: %w", a.Name, err)
+		// RemoveAll handles prior symlinks (legacy install), prior copies
+		// (re-install), and any stray empties — keeps the operation idempotent.
+		_ = os.RemoveAll(dst)
+		if err := copyFile(src, dst); err != nil {
+			return nil, "", fmt.Errorf("copy agent %s: %w", a.Name, err)
 		}
 	}
-	// Skills are COPIED, not symlinked. Claude Code's project-level skill
-	// loader does not follow symlinks under .claude/skills/ — symlinked
-	// skills exist on disk but are absent from the Skill tool's discovery
-	// list (returns "Unknown skill" on invocation). Symlinks ARE followed
-	// at runtime when reading the skill body, but the validation/discovery
-	// pass that builds the available-skills list does not resolve them.
-	// See upstream issues anthropics/claude-code#14836, #25367, #37590.
-	//
-	// Workaround: copy the skill directory into the project. Trade-off:
-	// `atl update` only refreshes the cached source — projects with copied
-	// skills become stale. To pick up updates, re-run `atl install <team>`
-	// in the project, which re-executes resolveAndSymlink and re-copies
-	// the latest cached content.
-	//
-	// Agents and rules continue to be symlinked: agents are read at
-	// runtime by file path (symlinks transparent), and .claude/rules/
-	// supports symlink discovery in Claude Code (per upstream behavior).
 	for _, s := range resolved.Effective.Skills {
 		src := filepath.Join(config.TeamRepoDir(s.SourceTeam), "skills", s.Name)
 		if _, err := os.Stat(src); err != nil {
@@ -177,8 +181,6 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 		}
 		dst := filepath.Join(projectClaude, "skills", s.Name)
 		maybeWarnCollision(warnCollisions, existingOwnership, "skill", s.Name, target)
-		// RemoveAll handles both prior symlinks (old install) and prior
-		// copy directories (re-install), keeping the operation idempotent.
 		_ = os.RemoveAll(dst)
 		if err := copySkillDir(src, dst); err != nil {
 			return nil, "", fmt.Errorf("copy skill %s: %w", s.Name, err)
@@ -191,13 +193,39 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 		}
 		dst := filepath.Join(projectClaude, "rules", r.Name+".md")
 		maybeWarnCollision(warnCollisions, existingOwnership, "rule", r.Name, target)
-		_ = os.Remove(dst)
-		if err := os.Symlink(src, dst); err != nil {
-			return nil, "", fmt.Errorf("symlink rule %s: %w", r.Name, err)
+		_ = os.RemoveAll(dst)
+		if err := copyFile(src, dst); err != nil {
+			return nil, "", fmt.Errorf("copy rule %s: %w", r.Name, err)
 		}
 	}
 
 	return resolved, regStatus, nil
+}
+
+// copyFile copies a single regular file from src to dst, preserving the
+// source file's permission bits. Used for agent and rule install (single-file
+// resources). Skills use copySkillDir (recursive walk) since they are
+// directory trees.
+func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("copyFile expected a regular file, got directory: %s", src)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // copySkillDir does a recursive file copy from src to dst. Used for skill

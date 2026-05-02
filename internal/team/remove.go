@@ -1,7 +1,6 @@
 package team
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -158,9 +157,5 @@ func CountLocalModifications(cwd, teamName string) int {
 }
 
 func writeManifestFile(cwd string, m *TeamInstallsManifest) error {
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(config.TeamInstallsManifest(cwd), data, 0o644)
+	return config.WriteJSONAtomic(config.TeamInstallsManifest(cwd), m)
 }

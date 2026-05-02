@@ -72,7 +72,7 @@ Common flags for hooks: --silent-if-clean (no output when nothing changed),
 Pass a team name as the first argument for the legacy per-team mode (resolves
 a single team's chain and re-runs install on it). Most users want the no-arg
 form; the per-team mode is preserved for compatibility.`,
-		Args:  cobra.MaximumNArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// ---- legacy per-team mode (user passed a name) ---------------
 			if len(args) == 1 {

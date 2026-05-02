@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/agentteamland/cli/internal/learnings"
 	"github.com/spf13/cobra"
@@ -47,9 +48,11 @@ import (
 // are found, which keeps boring sessions free at the SessionStart hook.
 func NewLearningCapture() *cobra.Command {
 	var (
-		silentIfEmpty       bool
-		transcriptPath      string
-		previousTranscripts bool
+		silentIfEmpty         bool
+		transcriptPath        string
+		previousTranscripts   bool
+		commitFromTranscripts bool
+		commitTranscriptList  string
 	)
 
 	cmd := &cobra.Command{
@@ -70,6 +73,11 @@ Invocation:
   atl learning-capture --silent-if-empty    # combine with above for hooks
   atl learning-capture                      # legacy: read hook JSON from stdin
   atl learning-capture --transcript-path X  # legacy: explicit single transcript
+  atl learning-capture --commit-from-transcripts --transcripts a.jsonl,b.jsonl,...
+                                            # /save-learnings calls this after
+                                            # successful processing — adds the
+                                            # marker hashes to state so the next
+                                            # SessionStart does not re-report them
 
 Marker format (in any assistant message within a transcript):
 
@@ -80,16 +88,20 @@ Marker format (in any assistant message within a transcript):
   body: 7-day JWT refresh chosen because we want long sessions.
   -->
 
-The new --previous-transcripts mode is what 'atl session-start' calls
-on every Claude Code session start (once the session-start hook is wired
-in PR 2A.3). The output appears in Claude's additionalContext, prompting
-/save-learnings --from-markers --transcripts ... auto-application.
+The --previous-transcripts mode is what 'atl session-start' calls on
+every Claude Code session start. The output appears in Claude's
+additionalContext, prompting /save-learnings --from-markers --transcripts
+... auto-application.
 
 State file (~/.claude/state/learning-capture-state.json) records the
-last successful save-learnings run per project. /save-learnings owns the
-write semantic — this command only reads it (so a crashed save-learnings
-run causes the next session to re-report, not silently lose the work).`,
+last successful save-learnings run per project AND the FIFO-capped set
+of marker hashes that have already been processed. The CLI writes the
+state ONLY via --commit-from-transcripts (called by /save-learnings on
+success), preserving "state advances iff processing succeeded."`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commitFromTranscripts {
+				return runCommitFromTranscripts(commitTranscriptList)
+			}
 			if previousTranscripts {
 				return runFromPreviousTranscripts(silentIfEmpty)
 			}
@@ -100,6 +112,8 @@ run causes the next session to re-report, not silently lose the work).`,
 	cmd.Flags().BoolVar(&silentIfEmpty, "silent-if-empty", false, "Produce no output when no markers found (for hooks)")
 	cmd.Flags().StringVar(&transcriptPath, "transcript-path", "", "Explicit transcript path (bypasses stdin) — single-file mode")
 	cmd.Flags().BoolVar(&previousTranscripts, "previous-transcripts", false, "Scan cwd's Claude Code session transcripts since last save-learnings run (multi-file mode)")
+	cmd.Flags().BoolVar(&commitFromTranscripts, "commit-from-transcripts", false, "Commit processed-marker hashes from --transcripts to state (called by /save-learnings on success)")
+	cmd.Flags().StringVar(&commitTranscriptList, "transcripts", "", "Comma-separated transcript paths to commit (used with --commit-from-transcripts)")
 	return cmd
 }
 
@@ -401,17 +415,133 @@ func runFromPreviousTranscripts(silentIfEmpty bool) error {
 	if scanErr != nil {
 		fmt.Fprintf(os.Stderr, "📝 learning-capture: scan error: %v (results may be partial)\n", scanErr)
 	}
+
+	// Filter out markers whose hash is already in state.processedMarkers.
+	// This is the precise filter that handles the long-running-session
+	// case: even if a transcript file's modtime advanced past the
+	// lastProcessedAt cutoff (because the same session kept appending
+	// after /save-learnings ran), markers with a known hash do not
+	// re-report on the next SessionStart.
+	processed := state.ProcessedSet(slug)
+	if len(processed) > 0 {
+		filtered := markers[:0]
+		for _, m := range markers {
+			if !processed[m.Hash()] {
+				filtered = append(filtered, m)
+			}
+		}
+		markers = filtered
+	}
+
 	if len(markers) == 0 {
 		if silentIfEmpty {
 			return nil
 		}
-		fmt.Printf("📝 learning-capture: scanned %d transcript%s, no markers found\n",
+		fmt.Printf("📝 learning-capture: scanned %d transcript%s, no unprocessed markers (all already in state)\n",
 			len(transcripts), plural(len(transcripts)))
 		return nil
 	}
 
 	fmt.Print(formatPreviousTranscriptsReport(markers, transcripts))
 	return nil
+}
+
+// runCommitFromTranscripts is invoked by /save-learnings after it has
+// successfully processed markers from the named transcripts. This
+// command re-scans the same transcripts, computes the canonical
+// Marker.Hash for each marker found, and adds those hashes to the
+// project's processedMarkers list in state. Subsequent SessionStart
+// runs of `atl learning-capture --previous-transcripts` exclude any
+// marker whose hash is in that list — which fixes the long-running-
+// session re-report bug.
+//
+// Idempotent: re-committing the same transcripts re-adds the same
+// hashes, which the AddProcessed dedup-on-insert logic absorbs as
+// no-ops.
+//
+// State writes are atomic (config.WriteJSONAtomic via WriteState).
+// On any failure, stdout reports the error to stderr and exits 0 —
+// /save-learnings already finished its real work; failing here only
+// costs us a re-report on the next session, not lost user work.
+func runCommitFromTranscripts(transcriptList string) error {
+	if transcriptList == "" {
+		fmt.Fprintln(os.Stderr, "learning-capture: --commit-from-transcripts requires --transcripts <comma-list>")
+		return nil
+	}
+	transcripts := strings.Split(transcriptList, ",")
+	for i, p := range transcripts {
+		transcripts[i] = strings.TrimSpace(p)
+	}
+
+	root, err := learnings.ResolveProjectRoot()
+	if err != nil || root == "" {
+		fmt.Fprintln(os.Stderr, "learning-capture: cannot resolve project root for state-file write")
+		return nil
+	}
+	slug := learnings.SlugForPath(root)
+
+	markers, scanErr := learnings.ScanMarkersInTranscripts(transcripts)
+	if scanErr != nil {
+		fmt.Fprintf(os.Stderr, "learning-capture: commit scan error: %v (results may be partial)\n", scanErr)
+	}
+
+	hashes := make([]string, 0, len(markers))
+	seen := make(map[string]bool, len(markers))
+	for _, m := range markers {
+		h := m.Hash()
+		if !seen[h] {
+			hashes = append(hashes, h)
+			seen[h] = true
+		}
+	}
+
+	// Stamp lastProcessedAt to the most-recent transcript modtime.
+	// This advances the coarse modtime filter as well, so future
+	// scans skip files entirely when nothing has changed.
+	stamp := mostRecentModTime(transcripts)
+
+	state, _ := learnings.ReadState()
+	state.AddProcessed(slug, hashes, stamp)
+	if err := learnings.WriteState(state); err != nil {
+		fmt.Fprintf(os.Stderr, "learning-capture: state write failed: %v\n", err)
+		return nil
+	}
+
+	fmt.Printf("📝 learning-capture: committed %d marker hash%s for %s (state.processedMarkers now has %d entr%s)\n",
+		len(hashes), pluralEs(len(hashes)), slug,
+		len(state.Projects[slug].ProcessedMarkers), pluralEsY(len(state.Projects[slug].ProcessedMarkers)))
+	return nil
+}
+
+func mostRecentModTime(paths []string) time.Time {
+	var t time.Time
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(t) {
+			t = info.ModTime()
+		}
+	}
+	if t.IsZero() {
+		return time.Now().UTC()
+	}
+	return t.UTC()
+}
+
+func pluralEs(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "es"
+}
+
+func pluralEsY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 // formatPreviousTranscriptsReport renders the multi-transcript scan

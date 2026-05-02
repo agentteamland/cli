@@ -102,27 +102,10 @@ form; the per-team mode is preserved for compatibility.`,
 				Verbose:       verbose,
 			})
 
-			// Per-project steps (Q2 migration + Q3 auto-refresh of
-			// unmodified copies). SessionStart hook fires inside a project's
-			// working directory, so cwd is the natural starting point. The
-			// migration runs first (one-time, idempotent) so the refresh
-			// step always sees real files (not lingering symlinks from the
-			// legacy install topology).
-			if !checkOnly {
-				if root, err := updater.FindProjectRoot(); err == nil && root != "" {
-					// Q2 — symlink → copy migration (legacy topology cleanup).
-					if _, summary, _ := updater.MigrateProjectInstall(root); summary != "" {
-						fmt.Println(summary)
-					}
-					// Q3 — refresh unmodified copies; skip those with local
-					// mutations (preserving self-updating-learning-loop work).
-					if refreshSummary, err := updater.RefreshUnmodifiedCopies(root); err == nil {
-						if line := updater.FormatRefreshSummary(refreshSummary, root); line != "" {
-							fmt.Print(line)
-						}
-					}
-				}
-			}
+			// Per-project steps (Q2 migration + Q3 auto-refresh). Shared
+			// with atl session-start via the updater package so any future
+			// boot-time step is added in one place.
+			updater.RunPerProjectSteps(checkOnly)
 
 			summary := res.FormatSummary(silentIfClean)
 			if summary != "" {

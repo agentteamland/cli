@@ -15,18 +15,31 @@ import (
 //
 // Modes:
 //
-//	atl update                       # update every repo in ~/.claude/repos/agentteamland/
-//	                                 # plus a self-release check. Verbose output.
-//	atl update <team-name>           # update only that team's chain (legacy behavior).
+//	atl update                       # pull global cache + auto-migrate any legacy
+//	                                 # symlinks + auto-refresh unmodified copies
+//	                                 # for the project at cwd. Verbose output.
+//	atl update <team-name>           # update only that team's chain (legacy mode).
 //	atl update --silent-if-clean     # no output unless something changed. Used by hooks.
 //	atl update --check-only          # dry run: show what WOULD update, pull nothing.
 //	atl update --throttle=30m        # skip entirely if last successful run was <30m ago.
 //	atl update --skip-self-check     # skip the atl-release check.
 //
-// When invoked with no team name, `update` pulls every git repo under
-// ~/.claude/repos/agentteamland/ — that's teams AND global repos (core,
-// brainstorm, rule, team-manager, etc.). They all live in the same cache and
-// share the same pull mechanism.
+// Default mode does three things in order, scoped to the project at cwd:
+//
+//  1. Pull every git repo under ~/.claude/repos/agentteamland/ (the global
+//     cache: core, brainstorm, rule, team-manager, every installed team).
+//  2. One-time legacy migration: scan .claude/agents/ + .claude/rules/ for
+//     symlinks (pre-v1.0 install topology) and convert each to a real file
+//     copy. Idempotent — a no-op once migration has run.
+//  3. Auto-refresh: for each installed team's resources, compare the project
+//     copy's content hash against the install-time baseline AND against the
+//     freshly-pulled global-cache hash. Refresh unmodified copies silently;
+//     skip modified copies and surface a per-team "use --refresh to force"
+//     info line so the user can opt into discarding their local changes.
+//
+// The auto-refresh step is what restores the zero-effort auto-update UX
+// that legacy symlinks provided for free, while protecting local
+// self-updating-learning-loop mutations from being silently overwritten.
 func NewUpdate() *cobra.Command {
 	var (
 		verbose       bool
@@ -39,6 +52,26 @@ func NewUpdate() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update [team-name]",
 		Short: "Pull updates for installed teams (and all cached agentteamland repos)",
+		Long: `Pull updates from every cached AgentTeamLand repo and apply per-project
+refresh steps for the project at the current working directory.
+
+The default mode does three things in order:
+
+  1. Pull every git repo under ~/.claude/repos/agentteamland/ (the global
+     cache: core, brainstorm, rule, team-manager, every installed team).
+  2. One-time legacy migration: convert any pre-v1.0 symlinks under
+     .claude/agents/ + .claude/rules/ into real file copies. Idempotent.
+  3. Auto-refresh: for each installed team's resources, refresh project
+     copies that still match their install-time baseline; skip copies
+     with local modifications and surface a per-team "use --refresh to
+     force" info line.
+
+Common flags for hooks: --silent-if-clean (no output when nothing changed),
+--throttle=30m (cooldown between hook-driven runs).
+
+Pass a team name as the first argument for the legacy per-team mode (resolves
+a single team's chain and re-runs install on it). Most users want the no-arg
+form; the per-team mode is preserved for compatibility.`,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// ---- legacy per-team mode (user passed a name) ---------------

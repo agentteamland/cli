@@ -13,23 +13,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewSetupHooks builds the `atl setup-hooks` command — writes four Claude Code
+// NewSetupHooks builds the `atl setup-hooks` command — writes Claude Code
 // hooks into ~/.claude/settings.json:
 //
-//   - SessionStart     → atl update --silent-if-clean
-//     (auto-update check at every new session start)
-//   - UserPromptSubmit → atl update --silent-if-clean --throttle=<duration>
-//     (auto-update check per message, throttled)
-//   - SessionEnd       → atl learning-capture --silent-if-empty
-//     (scans transcript for <!-- learning --> markers
-//     and prepares save-learnings work when found)
-//   - PreCompact       → atl learning-capture --silent-if-empty
-//     (same scanner, before context compaction — catches
-//     learnings that would otherwise be summarized away)
+//   - SessionStart: atl session-start --silent-if-clean
+//     (composite boot-time tasks — cache pull, per-project migration,
+//     per-project auto-refresh, transcript marker scan; output reaches
+//     Claude's additionalContext on the first turn)
 //
-// The merge is idempotent: re-running the command replaces only the atl-owned
-// hook entries (any command starting with "atl "), preserving any other hooks
-// the user has configured.
+//   - UserPromptSubmit: atl update --silent-if-clean --throttle=<duration>
+//     (throttled cache-pull check per message)
+//
+// SessionEnd and PreCompact registrations were removed in PR 2A.3
+// (atl v1.1.0). Their stdout never reached Claude's context per Claude
+// Code v2.1.x docs — only SessionStart / UserPromptSubmit / UserPromptExpansion
+// deliver additionalContext. Marker capture moved to SessionStart via the
+// session-start wrapper, where the report is actually visible to Claude.
+// See .claude/wiki/claude-code-hook-output-events.md.
+//
+// The merge is idempotent: re-running replaces only atl-owned hook entries
+// (any command starting with "atl "), preserving any other hooks the user
+// has configured. Re-running ALSO removes legacy SessionEnd / PreCompact
+// atl entries from previous installs — silent migration on first
+// session-start of v1.1.0+.
 func NewSetupHooks() *cobra.Command {
 	var (
 		remove   bool
@@ -41,21 +47,23 @@ func NewSetupHooks() *cobra.Command {
 		Short: "Configure Claude Code hooks for auto-update + learning capture",
 		Long: `Configure atl automation via Claude Code hooks.
 
-Installs four hooks into ~/.claude/settings.json:
+Installs hooks into ~/.claude/settings.json:
 
-  - SessionStart      → atl update --silent-if-clean
-                        (auto-update every repo in ~/.claude/repos/agentteamland/)
+  - SessionStart      → atl session-start --silent-if-clean
+                        (composite boot-time tasks: cache pull + per-project
+                         migration + auto-refresh + transcript marker scan;
+                         output reaches Claude's additionalContext)
   - UserPromptSubmit  → atl update --silent-if-clean --throttle=<duration>
-                        (throttled auto-update, default 30m)
-  - SessionEnd        → atl learning-capture --silent-if-empty
-                        (scans transcript for <!-- learning --> markers;
-                         silent when no markers present — zero cost)
-  - PreCompact        → atl learning-capture --silent-if-empty
-                        (same scanner, runs before context compaction
-                         so markers are not lost to summarization)
+                        (throttled cache-pull check per message, default 30m)
 
-When updates or markers are detected, a short report shows up in your
-terminal AND in Claude's context. Empty sessions stay silent (free).
+When updates or markers are detected, a short report appears in your
+terminal AND in Claude's context. Empty sessions stay silent (zero cost).
+
+Legacy hook migration: previous atl versions also registered SessionEnd
+and PreCompact for marker scanning. Those events do not deliver stdout
+to Claude (per Claude Code docs), so the marker reports were silently
+lost. v1.1.0+ removes those registrations on next setup-hooks run; the
+marker scan now runs inside session-start where it actually surfaces.
 
 The merge is idempotent: re-running replaces only atl-owned entries.
 Other hooks you have are preserved. Pass --remove to uninstall.
@@ -89,9 +97,15 @@ The file edited is ~/.claude/settings.json.`,
 // without requiring a separate tag per command.
 const atlCmdPrefix = "atl "
 
-// atlHookEvents is the full set of Claude Code hook events atl installs into.
-// Keep this list in sync with the setters in runSetupHooks; removal uses it
-// to clean every possible event we could have written to.
+// atlHookEvents is the full set of Claude Code hook events atl could have
+// written to (current + legacy). Used by --remove for cleanup, AND by the
+// install path's migration step to clean v1.0.x SessionEnd + PreCompact
+// entries before installing the v1.1.0+ shape.
+//
+// Keep this list as a superset of every event atl has ever installed into.
+// The active subset (currently SessionStart + UserPromptSubmit) is implied
+// by the upsertEventEntry calls in runSetupHooks; everything else here is
+// kept solely for cleanup of legacy installs.
 var atlHookEvents = []string{"SessionStart", "UserPromptSubmit", "SessionEnd", "PreCompact"}
 
 func runSetupHooks(throttle string) error {
@@ -103,14 +117,19 @@ func runSetupHooks(throttle string) error {
 
 	hooks := ensureMap(obj, "hooks")
 
-	updateCmd := "atl update --silent-if-clean"
+	sessionStartCmd := "atl session-start --silent-if-clean"
 	updateThrottledCmd := fmt.Sprintf("atl update --silent-if-clean --throttle=%s", throttle)
-	captureCmd := "atl learning-capture --silent-if-empty"
 
-	upsertEventEntry(hooks, "SessionStart", updateCmd)
+	// Install / replace active hooks.
+	upsertEventEntry(hooks, "SessionStart", sessionStartCmd)
 	upsertEventEntry(hooks, "UserPromptSubmit", updateThrottledCmd)
-	upsertEventEntry(hooks, "SessionEnd", captureCmd)
-	upsertEventEntry(hooks, "PreCompact", captureCmd)
+
+	// Silent legacy migration: clean any v1.0.x atl entries from events
+	// we no longer use. Returns whether anything was removed; we surface
+	// this to the user so they understand why settings.json shrunk.
+	migratedSessionEnd := cleanEventEntries(hooks, "SessionEnd")
+	migratedPreCompact := cleanEventEntries(hooks, "PreCompact")
+	migrated := migratedSessionEnd || migratedPreCompact
 
 	if err := writeSettingsJSON(settingsPath, obj); err != nil {
 		return err
@@ -118,15 +137,19 @@ func runSetupHooks(throttle string) error {
 
 	color.Green("✓ atl hooks installed")
 	fmt.Println()
-	fmt.Printf("  SessionStart     → %s\n", updateCmd)
+	fmt.Printf("  SessionStart     → %s\n", sessionStartCmd)
 	fmt.Printf("  UserPromptSubmit → %s\n", updateThrottledCmd)
-	fmt.Printf("  SessionEnd       → %s\n", captureCmd)
-	fmt.Printf("  PreCompact       → %s\n", captureCmd)
+	if migrated {
+		fmt.Println()
+		fmt.Println("ℹ Removed legacy SessionEnd / PreCompact registrations from a previous")
+		fmt.Println("  atl version. Their stdout never reached Claude's context (Claude Code")
+		fmt.Println("  docs); marker scanning now runs inside session-start instead.")
+	}
 	fmt.Println()
 	fmt.Println("Edited: " + settingsPath)
 	fmt.Println("Auto-update: teams + core + brainstorm + rule + team-manager + atl binary.")
-	fmt.Println("Learning capture: inline <!-- learning --> markers are collected at")
-	fmt.Println("session end and before context compaction. Zero cost when no markers.")
+	fmt.Println("Learning capture: inline <!-- learning --> markers from previous transcripts")
+	fmt.Println("are scanned at session start. Zero cost when no markers.")
 	fmt.Println("Remove at any time with: atl setup-hooks --remove")
 	return nil
 }

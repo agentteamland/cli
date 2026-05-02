@@ -105,8 +105,13 @@ atl install <https-or-ssh-git-url>      # direct URL (works for any host, public
 atl install <local-filesystem-path>     # ./rel, /abs, ~/path, file://URL  (atl ≥ 0.1.4)
 
 atl list                                # show installed teams + effective counts
-atl remove <team>                       # unlinks symlinks; cached repo stays
-atl update [team]                       # pull updates; refresh all symlinks
+atl install <team> --refresh            # force overwrite of an already-installed
+                                        # team (discards local changes)         (atl ≥ 1.0)
+atl remove <team>                       # delete project copies; confirm if locally
+                                        # modified; cached repo stays            (atl ≥ 1.0)
+atl remove <team> --force               # skip the confirm prompt                (atl ≥ 1.0)
+atl update                              # pull global cache + auto-refresh unmodified
+                                        # project copies; skip modified ones     (atl ≥ 1.0)
 atl update --silent-if-clean            # hook-friendly: no output if nothing changed
 atl update --check-only                 # dry-run: what WOULD update
 atl update --throttle=30m               # skip if last run <30m ago
@@ -157,9 +162,11 @@ Full guide: [docs.agentteamland — Creating a team](https://agentteamland.githu
 
 Every installable **team** is a git repository with a `team.json` at its root declaring its identity, agents/skills/rules, and (optionally) an `extends` parent.
 
-`atl install <name>` walks the inheritance chain (unlimited depth, cycle-detected), merges the effective agent/skill/rule set with *child overrides parent* semantics (and honoring `excludes`), then creates symlinks from the cached source repos into your project's `.claude/agents/`, `.claude/skills/`, `.claude/rules/`.
+`atl install <name>` walks the inheritance chain (unlimited depth, cycle-detected), merges the effective agent/skill/rule set with *child overrides parent* semantics (and honoring `excludes`), then **copies** every resolved resource from the cached source repos into your project's `.claude/agents/`, `.claude/skills/`, `.claude/rules/`.
 
-Cached source repos live in `~/.claude/repos/agentteamland/` and are shared across all projects on the machine. Only the project-level symlinks differ.
+Cached source repos live in `~/.claude/repos/agentteamland/` and are shared across all projects on the machine. Each project keeps its own self-contained copy of the resources, so local changes (from `/save-learnings`, hand edits, or `self-updating-learning-loop` auto-grown content) never leak back into the shared cache.
+
+`atl update` keeps copies in sync without manual work: it pulls the global cache, detects whether each project copy still matches its install-time baseline, and **refreshes unmodified copies** silently with the new cache content. Modified copies are left alone, with a one-line hint pointing at `atl install <team> --refresh` for explicit force-overwrite.
 
 ## Submit your team to the registry
 
@@ -167,7 +174,19 @@ Open a PR against [agentteamland/registry](https://github.com/agentteamland/regi
 
 ## Status
 
-**Current: v0.2.0** — everything in v0.1.5 plus learning-capture automation:
+**Current: v1.0.0** — install topology overhaul: every team resource (agents, rules, skills) now installs as a project-local copy. Auto-refresh on `atl update` keeps unmodified copies in sync without manual intervention; modified copies are protected.
+
+  - **Self-contained projects.** Agents and rules join skills in copy-mode install — no more symlinks back to `~/.claude/repos/agentteamland/`. Mutations from `/save-learnings`, hand edits, or future `self-updating-learning-loop` auto-grown content stay isolated to the project; the global cache is never polluted.
+  - **One-time auto-migration.** Existing projects on legacy symlink topology auto-convert on the next `atl update`. Single info line surfaces the count; no manual action.
+  - **Auto-refresh of unmodified copies on `atl update`.** Three-way hash check (project copy vs. install-time baseline vs. current global cache) decides per-resource: unmodified → silently refresh, modified → skip with a per-team hint pointing at `atl install <team> --refresh`. Keeps the zero-effort auto-update UX symlinks gave for free, but with local-change protection.
+  - **Idempotent `atl install`.** Re-running `atl install <team>` on an already-installed team is now a no-op + info line. Pass `--refresh` to force overwrite (with a "Discarding local changes (N modified)" warning when applicable). The legacy "every install silently overwrites" semantic is gone.
+  - **Confirm gate on `atl remove`.** Removing a team with locally-modified copies prompts for confirmation; `--force` bypasses. Bonus latent-bug fix: user-authored project-local files (not registered with atl) are now correctly preserved across `atl remove`.
+
+**⚠️ Breaking changes from v0.x:**
+1. `atl install <existing-team>` is no longer a silent reinstall. Use `atl install <team> --refresh` for the old behavior, or rely on `atl update` to auto-refresh unmodified copies.
+2. `atl remove <team>` may prompt before destructive ops. Use `--force` for non-interactive scripts.
+
+**v0.2.0** — everything in v0.1.5 plus learning-capture automation:
   - **`atl learning-capture`** — new command that scans the Claude Code session transcript for inline `<!-- learning -->` markers and reports what was found. Silent when no markers; produces a short report when markers exist so `/save-learnings` can process them into wiki + memory + doc drafts.
   - **`atl setup-hooks` now installs four hooks** (up from two):
     - `SessionStart` → `atl update --silent-if-clean`

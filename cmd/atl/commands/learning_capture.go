@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/agentteamland/cli/internal/learnings"
@@ -473,12 +474,7 @@ func sortedKeys(m map[string]int) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// Lexical sort so the output is deterministic.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-		}
-	}
+	sort.Strings(keys)
 	return keys
 }
 

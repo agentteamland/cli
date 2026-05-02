@@ -162,9 +162,18 @@ func (r *Result) HasChanges() bool {
 	return false
 }
 
+// maxConcurrentFetches caps the number of in-flight `git fetch` calls so a
+// large registry (50+ teams) cannot slam GitHub with one connection per repo.
+// 8 mirrors GitHub's recommended concurrency for unauthenticated read traffic
+// and is generous for typical user setups (5-10 cached repos finish in one
+// round-trip anyway).
+const maxConcurrentFetches = 8
+
 // updateAllRepos walks ~/.claude/repos/agentteamland/* and fetch-pulls each
-// one that has a .git directory. Parallelized (one goroutine per repo) so
-// the total wall-time is roughly one git-fetch roundtrip.
+// one that has a .git directory. Parallelized with a semaphore (capped at
+// maxConcurrentFetches) so the total wall-time is roughly one git-fetch
+// roundtrip for typical sets, but large registries don't open a goroutine
+// per repo.
 func updateAllRepos(checkOnly, verbose bool) []RepoUpdate {
 	cacheDir := config.RepoCache()
 	entries, err := os.ReadDir(cacheDir)
@@ -176,6 +185,7 @@ func updateAllRepos(checkOnly, verbose bool) []RepoUpdate {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	results := make([]RepoUpdate, 0, len(entries))
+	sem := make(chan struct{}, maxConcurrentFetches)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -191,6 +201,8 @@ func updateAllRepos(checkOnly, verbose bool) []RepoUpdate {
 		wg.Add(1)
 		go func(name, dir string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			u := fetchAndPull(name, dir, checkOnly, verbose)
 			mu.Lock()
 			results = append(results, u)

@@ -69,17 +69,24 @@ func NewUpdate() *cobra.Command {
 				Verbose:       verbose,
 			})
 
-			// Per-project legacy-symlink migration (one-time, idempotent).
-			// SessionStart hook fires inside a project's working directory, so
-			// cwd is the natural starting point. We walk upward to find the
-			// project root (.claude/.team-installs.json marker), then convert
-			// any agents/rules symlinks found there to plain copies. Future
-			// PRs add the auto-refresh-of-unmodified-projects step (Q3) at
-			// the same point. See .claude/docs/install-mechanism-redesign.md.
+			// Per-project steps (Q2 migration + Q3 auto-refresh of
+			// unmodified copies). SessionStart hook fires inside a project's
+			// working directory, so cwd is the natural starting point. The
+			// migration runs first (one-time, idempotent) so the refresh
+			// step always sees real files (not lingering symlinks from the
+			// legacy install topology).
 			if !checkOnly {
 				if root, err := updater.FindProjectRoot(); err == nil && root != "" {
+					// Q2 — symlink → copy migration (legacy topology cleanup).
 					if _, summary, _ := updater.MigrateProjectInstall(root); summary != "" {
 						fmt.Println(summary)
+					}
+					// Q3 — refresh unmodified copies; skip those with local
+					// mutations (preserving self-updating-learning-loop work).
+					if refreshSummary, err := updater.RefreshUnmodifiedCopies(root); err == nil {
+						if line := updater.FormatRefreshSummary(refreshSummary, root); line != "" {
+							fmt.Print(line)
+						}
 					}
 				}
 			}

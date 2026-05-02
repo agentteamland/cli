@@ -446,4 +446,3 @@ func quotePaths(paths []string) []string {
 	}
 	return out
 }
-

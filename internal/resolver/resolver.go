@@ -8,6 +8,7 @@ package resolver
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/agentteamland/cli/internal/config"
@@ -180,12 +181,7 @@ func sortedValues(m map[string]ResolvedItem) []ResolvedItem {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// Simple alphabetical sort.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-		}
-	}
+	sort.Strings(keys)
 	out := make([]ResolvedItem, len(keys))
 	for i, k := range keys {
 		out[i] = m[k]

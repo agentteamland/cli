@@ -35,7 +35,11 @@ if [ "${GOOS}" = "windows" ]; then
   OUT_NAME="atl.exe"
 fi
 
+BUILD_COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+BUILD_DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
 echo "Building atl ${VERSION} for ${GOOS}/${GOARCH} → bin/${OUT_NAME}"
+echo "  commit=${BUILD_COMMIT} date=${BUILD_DATE}"
 
 docker run --rm \
   -v "${REPO_ROOT}:/app" \
@@ -47,7 +51,10 @@ docker run --rm \
   -e CGO_ENABLED=0 \
   golang:1.22-alpine \
   sh -c "go mod tidy && go build \
-    -ldflags='-s -w -X github.com/agentteamland/cli/internal/config.Version=${VERSION}' \
+    -ldflags='-s -w \
+      -X github.com/agentteamland/cli/internal/config.Version=${VERSION} \
+      -X github.com/agentteamland/cli/internal/config.Commit=${BUILD_COMMIT} \
+      -X github.com/agentteamland/cli/internal/config.Date=${BUILD_DATE}' \
     -o bin/${OUT_NAME} ./cmd/atl"
 
 echo ""

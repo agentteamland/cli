@@ -75,15 +75,24 @@ the /refresh skill (PR 2A.4) which calls this command with verbose output.`,
 			// path as `atl update` — see internal/updater/projectsteps.go.
 			updater.RunPerProjectSteps(false)
 
-			// Cache-pull summary printed last so per-project lines stay
-			// near the top of the output.
+			// Step 3 (PR 2A.2): scan unprocessed transcripts for inline
+			// <!-- learning --> markers. The output appears in Claude's
+			// additionalContext (via SessionStart hook injection) so the
+			// next-turn assistant call can act on it via /save-learnings
+			// --from-markers --transcripts ...
+			//
+			// Best-effort: any failure inside runFromPreviousTranscripts is
+			// swallowed (it returns nil even on error to keep hooks
+			// non-blocking) and prints to stderr at most. The cache pull
+			// summary is unaffected.
+			_ = runFromPreviousTranscripts(silentIfClean)
+
+			// Cache-pull summary printed last so per-project + learning
+			// lines stay near the top of the output.
 			summary := res.FormatSummary(silentIfClean)
 			if summary != "" {
 				fmt.Print(summary)
 			}
-
-			// Future: step 3 — atl learning-capture --previous-transcripts
-			// will be inserted here in PR 2A.2.
 
 			return nil
 		},

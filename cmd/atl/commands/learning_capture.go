@@ -6,48 +6,71 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/agentteamland/cli/internal/learnings"
 	"github.com/spf13/cobra"
 )
 
-// NewLearningCapture builds the `atl learning-capture` command — scans the
-// current session transcript for inline `<!-- learning ... -->` markers and
-// reports what was found.
+// NewLearningCapture builds the `atl learning-capture` command — scans
+// Claude Code transcripts for inline `<!-- learning ... -->` markers and
+// reports what was found, in a form that Claude on the next turn can act on
+// via `/save-learnings --from-markers --transcripts ...`.
 //
-// It is driven by Claude Code hooks (SessionEnd, PreCompact) installed by
-// `atl setup-hooks`. Those hooks deliver the transcript path via a JSON blob
-// on stdin:
+// Two modes:
 //
-//	{"session_id": "...", "transcript_path": "/path/to/transcript.jsonl", ...}
+//  1. Single-transcript (legacy / explicit): read transcript path from hook
+//     JSON on stdin OR --transcript-path. Used by tests and by the older
+//     SessionEnd / PreCompact hook registrations (which DO NOT inject
+//     output into Claude's context — see [claude-code-hook-output-events.md]).
 //
-// When markers are found, the command prints a short report to stdout. The
-// harness injects that report into Claude's next-turn context; the
-// `learning-capture` rule + `/save-learnings --from-markers` skill pick it up
-// and perform the actual save work (wiki updates, memory append, doc drafts).
+//  2. --previous-transcripts (new in PR 2A.2): scan the cwd-resolved
+//     project's Claude Code session directory for transcript files
+//     modified since the last successful /save-learnings run (or, on
+//     first use of this project, within the last 7 days). Produces a
+//     report that lists transcript paths so /save-learnings can pull
+//     markers from each.
 //
-// When no markers are found and --silent-if-empty is passed, the command
-// exits silently — zero cost for boring sessions.
+// Marker format (anywhere in any transcript message):
+//
+//	<!-- learning
+//	topic: auth-refresh
+//	kind: decision
+//	doc-impact: readme
+//	body: 7-day JWT refresh chosen because we want long sessions.
+//	-->
+//
+// In every mode, --silent-if-empty produces no output when no markers
+// are found, which keeps boring sessions free at the SessionStart hook.
 func NewLearningCapture() *cobra.Command {
 	var (
-		silentIfEmpty  bool
-		transcriptPath string
+		silentIfEmpty       bool
+		transcriptPath      string
+		previousTranscripts bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "learning-capture",
-		Short: "Scan session transcript for <!-- learning --> markers (driven by hooks)",
-		Long: `Scan the current Claude Code session transcript for inline
-<!-- learning ... --> markers and report what was found.
+		Short: "Scan Claude Code transcripts for <!-- learning --> markers",
+		Long: `Scan Claude Code transcripts for inline <!-- learning ... --> markers
+and report what was found, in a form Claude on the next turn can process
+via /save-learnings --from-markers --transcripts ...
 
 Invocation:
 
-  atl learning-capture                      # reads hook JSON from stdin
-  atl learning-capture --silent-if-empty    # no output when 0 markers (hook default)
-  atl learning-capture --transcript-path X  # explicit path (for manual testing)
+  atl learning-capture --previous-transcripts
+                                            # scan all jsonl files for the
+                                            # cwd's project that were
+                                            # modified since the last
+                                            # successful save-learnings run
+                                            # (or last 7 days on first use)
+  atl learning-capture --silent-if-empty    # combine with above for hooks
+  atl learning-capture                      # legacy: read hook JSON from stdin
+  atl learning-capture --transcript-path X  # legacy: explicit single transcript
 
-Marker format (in any assistant message within the transcript):
+Marker format (in any assistant message within a transcript):
 
   <!-- learning
   topic: auth-refresh
@@ -56,20 +79,26 @@ Marker format (in any assistant message within the transcript):
   body: 7-day JWT refresh chosen because we want long sessions.
   -->
 
-When markers are found, the command prints a short report that Claude picks up
-on the next turn and processes via /save-learnings --from-markers. When no
-markers are found with --silent-if-empty, the command exits silently.
+The new --previous-transcripts mode is what 'atl session-start' calls
+on every Claude Code session start (once the session-start hook is wired
+in PR 2A.3). The output appears in Claude's additionalContext, prompting
+/save-learnings --from-markers --transcripts ... auto-application.
 
-This is the "capture half" of the learning-capture rule pair (see
-~/.claude/repos/agentteamland/core/rules/learning-capture.md). The
-"processing half" is the /save-learnings skill.`,
+State file (~/.claude/state/learning-capture-state.json) records the
+last successful save-learnings run per project. /save-learnings owns the
+write semantic — this command only reads it (so a crashed save-learnings
+run causes the next session to re-report, not silently lose the work).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if previousTranscripts {
+				return runFromPreviousTranscripts(silentIfEmpty)
+			}
 			return runLearningCapture(silentIfEmpty, transcriptPath)
 		},
 	}
 
 	cmd.Flags().BoolVar(&silentIfEmpty, "silent-if-empty", false, "Produce no output when no markers found (for hooks)")
-	cmd.Flags().StringVar(&transcriptPath, "transcript-path", "", "Explicit transcript path (bypasses stdin)")
+	cmd.Flags().StringVar(&transcriptPath, "transcript-path", "", "Explicit transcript path (bypasses stdin) — single-file mode")
+	cmd.Flags().BoolVar(&previousTranscripts, "previous-transcripts", false, "Scan cwd's Claude Code session transcripts since last save-learnings run (multi-file mode)")
 	return cmd
 }
 
@@ -278,3 +307,143 @@ func plural(n int) string {
 	}
 	return "s"
 }
+
+// runFromPreviousTranscripts is the --previous-transcripts entry point.
+// It locates the cwd's project root, resolves the Claude Code transcript
+// directory, reads the state file to find LastProcessedAt for this project
+// (or applies the 7-day first-run cap if no record exists), enumerates
+// transcripts modified after that cutoff, and scans them for markers.
+//
+// Output (when markers are found) lists the transcript paths so the
+// `/save-learnings --from-markers --transcripts ...` invocation has them.
+//
+// The project-root resolver is `learnings.ResolveProjectRoot` (which
+// only requires `.claude/`, not `.team-installs.json`) rather than
+// `updater.FindProjectRoot`. Marker-bearing transcripts can come from
+// any Claude-Code-aware project, including the maintainer workspace
+// itself which is not an atl-managed install target.
+func runFromPreviousTranscripts(silentIfEmpty bool) error {
+	root, err := learnings.ResolveProjectRoot()
+	if err != nil || root == "" {
+		return nil
+	}
+
+	state, _ := learnings.ReadState()
+	slug := learnings.SlugForPath(root)
+	since := state.LastProcessedAtFor(slug)
+
+	transcripts, err := learnings.FindUnprocessedTranscripts(root, since)
+	if err != nil {
+		// Best-effort: don't block hooks on a state-file or filesystem hiccup.
+		if !silentIfEmpty {
+			fmt.Fprintf(os.Stderr, "learning-capture: transcript discovery failed: %v\n", err)
+		}
+		return nil
+	}
+	if len(transcripts) == 0 {
+		if silentIfEmpty {
+			return nil
+		}
+		fmt.Println("📝 learning-capture: no new transcripts since last save-learnings run (0 cost)")
+		return nil
+	}
+
+	markers, _ := learnings.ScanMarkersInTranscripts(transcripts)
+	if len(markers) == 0 {
+		if silentIfEmpty {
+			return nil
+		}
+		fmt.Printf("📝 learning-capture: scanned %d transcript%s, no markers found\n",
+			len(transcripts), plural(len(transcripts)))
+		return nil
+	}
+
+	fmt.Print(formatPreviousTranscriptsReport(markers, transcripts))
+	return nil
+}
+
+// formatPreviousTranscriptsReport renders the multi-transcript scan
+// result as a compact summary suitable for SessionStart hook injection
+// (Claude Code's additionalContext is capped at ~10KB).
+//
+// Output format:
+//
+//	🧠 learning-capture: <N> unprocessed markers across <M> transcripts
+//	   <breakdown by kind>
+//	   <doc-impact summary if any>
+//
+//	→ Run: /save-learnings --from-markers --transcripts <path1>,<path2>,...
+//
+// Detailed marker listing is intentionally omitted — /save-learnings re-
+// scans the transcripts using its own (richer) classifier. Hook output
+// stays compact regardless of marker count.
+func formatPreviousTranscriptsReport(markers []learnings.Marker, transcripts []string) string {
+	var b strings.Builder
+	count := len(markers)
+
+	fmt.Fprintf(&b, "🧠 learning-capture: %d unprocessed marker%s across %d transcript%s\n",
+		count, plural(count), len(transcripts), plural(len(transcripts)))
+
+	// Aggregate by kind (decision / pattern / discovery / bug-fix / ...)
+	// and by doc-impact (readme / docs / both / breaking / none).
+	byKind := map[string]int{}
+	docImpact := 0
+	for _, m := range markers {
+		kind := m.Kind
+		if kind == "" {
+			kind = "?"
+		}
+		byKind[kind]++
+		if m.DocImpact != "" && m.DocImpact != "none" {
+			docImpact++
+		}
+	}
+	if len(byKind) > 0 {
+		var parts []string
+		for _, kind := range sortedKeys(byKind) {
+			parts = append(parts, fmt.Sprintf("%d %s", byKind[kind], kind))
+		}
+		fmt.Fprintf(&b, "  by kind: %s\n", strings.Join(parts, ", "))
+	}
+	if docImpact > 0 {
+		fmt.Fprintf(&b, "  %d marker%s require doc drafts (README / doc site) — see docs-sync rule\n",
+			docImpact, plural(docImpact))
+	}
+
+	// Transcript path list — Claude needs these to invoke save-learnings.
+	pathList := strings.Join(quotePaths(transcripts), ",")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "→ Run: /save-learnings --from-markers --transcripts %s\n", pathList)
+	return b.String()
+}
+
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	// Lexical sort so the output is deterministic.
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
+			keys[j-1], keys[j] = keys[j], keys[j-1]
+		}
+	}
+	return keys
+}
+
+// quotePaths escapes any spaces in transcript paths so the invocation
+// hint stays a copy-pasteable single line. Most transcript paths live
+// under ~/.claude/projects/<slug>/ which is space-free, so this is
+// usually a no-op — but defensive against unusual setups.
+func quotePaths(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		if strings.ContainsAny(p, " \t") {
+			out[i] = `"` + filepath.ToSlash(p) + `"`
+		} else {
+			out[i] = filepath.ToSlash(p)
+		}
+	}
+	return out
+}
+

@@ -192,9 +192,17 @@ func readHookInput() (hookInput, error) {
 // whatever text we find in the transcript.
 var markerBlockPattern = regexp.MustCompile(`(?s)<!--\s*learning\b(.*?)-->`)
 
+// topicPattern enforces the spec from learning-capture.md ("topic:
+// kebab-case, one concept"). Periods are tolerated as segment
+// separators so version-tagged topics survive. Drops prose ellipses
+// like `topic: ... doc-impact: docs ...` that slip through the regex.
+var topicPattern = regexp.MustCompile(`^[a-z0-9]+([-.][a-z0-9]+)*$`)
+
 // scanMarkers walks the JSONL transcript and returns every <!-- learning -->
-// block found in any text field (assistant messages, tool results, or user
-// messages — we don't filter by role because markers are legal anywhere).
+// block found in assistant-role text content. Markers in tool inputs/outputs,
+// user messages, and other shapes are documentation quotes / pasted prose,
+// not real emissions, and are filtered out at extraction time. Markers
+// missing a topic are dropped as partial captures.
 func scanMarkers(path string) ([]Marker, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -209,25 +217,65 @@ func scanMarkers(path string) ([]Marker, error) {
 	scanner.Buffer(buf, 8*1024*1024)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		// Each line is a JSON record. We grep through the raw JSON for speed;
-		// the regex operates on the escaped form which is still valid text.
-		matches := markerBlockPattern.FindAllSubmatch(line, -1)
-		for _, m := range matches {
-			if len(m) < 2 {
+		text := extractAssistantText(scanner.Bytes())
+		if text == "" {
+			continue
+		}
+		for _, sub := range markerBlockPattern.FindAllStringSubmatch(text, -1) {
+			if len(sub) < 2 {
 				continue
 			}
-			raw := string(m[1])
-			// JSON-escaped newlines appear as \n in the raw bytes; normalize.
-			raw = strings.ReplaceAll(raw, `\n`, "\n")
-			raw = strings.ReplaceAll(raw, `\"`, `"`)
-			markers = append(markers, parseMarker(raw))
+			m := parseMarker(sub[1])
+			if !topicPattern.MatchString(m.Topic) {
+				continue
+			}
+			markers = append(markers, m)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return markers, err
+	return markers, scanner.Err()
+}
+
+// transcriptEvent / extractAssistantText: see internal/learnings.transcripts.go
+// for the rationale. Mirrored here rather than imported to keep this single-
+// transcript scanner self-contained (the file already duplicates the marker
+// regex and parseMarker for the same reason).
+type transcriptEvent struct {
+	Message struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+func extractAssistantText(line []byte) string {
+	var ev transcriptEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return ""
 	}
-	return markers, nil
+	if ev.Message.Role != "assistant" || len(ev.Message.Content) == 0 {
+		return ""
+	}
+	var asString string
+	if err := json.Unmarshal(ev.Message.Content, &asString); err == nil {
+		return asString
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(ev.Message.Content, &parts); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type != "text" || p.Text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(p.Text)
+	}
+	return b.String()
 }
 
 // parseMarker extracts topic / kind / doc-impact / body from the inner text

@@ -594,11 +594,7 @@ func writeManifestEntry(cwd, topName string, resolved *resolver.Resolved, status
 	})
 	m.Teams = filtered
 
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := config.WriteJSONAtomic(path, m); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil

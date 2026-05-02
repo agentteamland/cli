@@ -3,6 +3,7 @@ package learnings
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -179,13 +180,18 @@ func (m Marker) IsValid() bool {
 
 func ScanMarkersInTranscripts(paths []string) ([]Marker, error) {
 	var all []Marker
+	var skipped []string
 	for _, p := range paths {
 		ms, err := scanFile(p)
 		if err != nil {
-			// Best-effort: skip the unreadable file, continue.
+			// Best-effort: record the unreadable file, continue.
+			skipped = append(skipped, filepath.Base(p))
 			continue
 		}
 		all = append(all, ms...)
+	}
+	if len(skipped) > 0 {
+		return all, fmt.Errorf("%d transcript(s) unreadable: %s", len(skipped), strings.Join(skipped, ", "))
 	}
 	return all, nil
 }

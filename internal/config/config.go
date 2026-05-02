@@ -2,6 +2,8 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -65,4 +67,38 @@ func TeamInstallsManifest(cwd string) string {
 // TeamRepoDir returns the cached source directory for a given team.
 func TeamRepoDir(teamName string) string {
 	return filepath.Join(RepoCache(), teamName)
+}
+
+// WriteJSONAtomic writes a value as pretty-printed JSON to path using the
+// canonical temp-file + rename pattern. Crashes mid-write leave the original
+// file intact (or absent), never a half-written corruption. The parent
+// directory must already exist.
+func WriteJSONAtomic(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".atl-write-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	// Best-effort cleanup if anything below fails before rename.
+	defer func() {
+		if _, statErr := os.Stat(tmpPath); statErr == nil {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }

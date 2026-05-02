@@ -6,12 +6,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/agentteamland/cli/internal/config"
 	"github.com/agentteamland/cli/internal/manifest"
 	"github.com/agentteamland/cli/internal/registry"
 )
+
+// safeSlug accepts only the characters we allow in a cache directory name:
+// kebab-case letters / digits / dots / hyphens, must start with alnum.
+// This blocks `git clone` and `git -C` flag-injection via slugs that begin
+// with `-` (e.g., `atl install owner/-malicious` could otherwise produce a
+// cache path `~/.claude/repos/agentteamland/-malicious`, which `git -C` would
+// then interpret as a flag).
+var safeSlug = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Loader implements resolver.Loader: given a team short name (or URL) it
 // clones/pulls the repo into the cache and reads its team.json.
@@ -32,9 +41,14 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 	// the team's repo name (last path segment, sans .git). For plain short names
 	// it returns the name as-is.
 	slug := slugFromInput(name)
+	if !safeSlug.MatchString(slug) {
+		return nil, "", fmt.Errorf("invalid team slug %q: must match [a-zA-Z0-9][a-zA-Z0-9._-]*", slug)
+	}
 	cacheDir := config.TeamRepoDir(slug)
 
-	// If cached, git pull to stay current. If not, git clone.
+	// If cached, git pull to stay current. If not, git clone. The `--` before
+	// the URL stops `git` from interpreting hostile clone URLs as flags
+	// (defense in depth alongside the slug regex above).
 	if _, err := os.Stat(cacheDir); err == nil {
 		if l.Verbose {
 			fmt.Fprintf(os.Stderr, "  pulling %s...\n", slug)
@@ -50,7 +64,7 @@ func (l *Loader) Load(name, constraint string) (*manifest.TeamManifest, string, 
 		if err := os.MkdirAll(config.RepoCache(), 0o755); err != nil {
 			return nil, "", fmt.Errorf("mkdir cache: %w", err)
 		}
-		cmd := exec.Command("git", "clone", "--quiet", cloneURL, cacheDir)
+		cmd := exec.Command("git", "clone", "--quiet", "--", cloneURL, cacheDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return nil, "", fmt.Errorf("git clone %s: %w (%s)", cloneURL, err, string(out))
 		}

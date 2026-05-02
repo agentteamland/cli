@@ -396,7 +396,10 @@ func runFromPreviousTranscripts(silentIfEmpty bool) error {
 		return nil
 	}
 
-	markers, _ := learnings.ScanMarkersInTranscripts(transcripts)
+	markers, scanErr := learnings.ScanMarkersInTranscripts(transcripts)
+	if scanErr != nil {
+		fmt.Fprintf(os.Stderr, "📝 learning-capture: scan error: %v (results may be partial)\n", scanErr)
+	}
 	if len(markers) == 0 {
 		if silentIfEmpty {
 			return nil

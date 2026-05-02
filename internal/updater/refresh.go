@@ -73,9 +73,7 @@ func RefreshUnmodifiedCopies(projectPath string) (RefreshSummary, error) {
 	}
 
 	if manifestChanged {
-		if data, err := json.MarshalIndent(m, "", "  "); err == nil {
-			_ = os.WriteFile(manifestPath, data, 0o644)
-		}
+		_ = config.WriteJSONAtomic(manifestPath, m)
 	}
 
 	return out, nil

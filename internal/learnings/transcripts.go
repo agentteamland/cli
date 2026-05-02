@@ -2,8 +2,10 @@ package learnings
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -157,6 +159,24 @@ type Marker struct {
 	Body      string
 }
 
+// topicPattern matches the spec for `topic` from learning-capture.md:
+// "kebab-case, one concept (auth-refresh, redis-ttl, build-pipeline)".
+// Periods are tolerated as segment separators so version-tagged topics
+// like `software-project-team-v1.1.4-cold-build-fixes` survive. Catches
+// prose ellipses like `topic: ... doc-impact: docs ...` that slip
+// through the role+regex filter (spaces, colons, uppercase rejected).
+var topicPattern = regexp.MustCompile(`^[a-z0-9]+([-.][a-z0-9]+)*$`)
+
+// IsValid reports whether the marker carries enough signal to be a real
+// learning emission rather than a partial capture (template fragment,
+// truncated paste, prose mention with ellipsis placeholders). Topic is
+// the routing key — without a kebab-case value it can't be filed under
+// a wiki / children / learnings page. Kind can default to "?" downstream;
+// body can be empty for one-line ideas.
+func (m Marker) IsValid() bool {
+	return topicPattern.MatchString(m.Topic)
+}
+
 func ScanMarkersInTranscripts(paths []string) ([]Marker, error) {
 	var all []Marker
 	for _, p := range paths {
@@ -183,19 +203,78 @@ func scanFile(path string) ([]Marker, error) {
 	scanner.Buffer(buf, 8*1024*1024)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		matches := markerBlockPattern.FindAllSubmatch(line, -1)
-		for _, m := range matches {
-			if len(m) < 2 {
+		text := extractAssistantText(scanner.Bytes())
+		if text == "" {
+			continue
+		}
+		for _, sub := range markerBlockPattern.FindAllStringSubmatch(text, -1) {
+			if len(sub) < 2 {
 				continue
 			}
-			raw := string(m[1])
-			raw = strings.ReplaceAll(raw, `\n`, "\n")
-			raw = strings.ReplaceAll(raw, `\"`, `"`)
-			markers = append(markers, parseMarker(raw))
+			m := parseMarker(sub[1])
+			if !m.IsValid() {
+				continue
+			}
+			markers = append(markers, m)
 		}
 	}
-	return markers, nil
+	return markers, scanner.Err()
+}
+
+// transcriptEvent slices the part of a Claude Code transcript JSONL
+// record that learning-capture cares about. Other top-level fields
+// (parentUuid, sessionId, type, …) are ignored.
+type transcriptEvent struct {
+	Message struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+// extractAssistantText returns the concatenated text content of an
+// assistant-role message, or "" when the line is anything else (user
+// message, tool input/output, summary event, system reminder, parse
+// error). Markers are emitted by Claude as text inside its own
+// responses; occurrences in any other shape are documentation quotes
+// (Read tool returning a rule file), tool inputs (a Bash command
+// quoting a marker example), tool outputs (a previous learning-
+// capture run echoed back), or pasted prose — none of which should
+// count as new learnings on the next session start.
+//
+// Content can be either a JSON string (legacy shape) or an array of
+// typed parts ({type, text} for prose, {type, input} for tool uses,
+// {type, content} for tool results). We accept only `type: text`
+// parts.
+func extractAssistantText(line []byte) string {
+	var ev transcriptEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return ""
+	}
+	if ev.Message.Role != "assistant" || len(ev.Message.Content) == 0 {
+		return ""
+	}
+	var asString string
+	if err := json.Unmarshal(ev.Message.Content, &asString); err == nil {
+		return asString
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(ev.Message.Content, &parts); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type != "text" || p.Text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(p.Text)
+	}
+	return b.String()
 }
 
 func parseMarker(inner string) Marker {

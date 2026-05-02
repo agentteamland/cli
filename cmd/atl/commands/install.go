@@ -16,7 +16,10 @@ import (
 
 // NewInstall builds the `atl install` command.
 func NewInstall() *cobra.Command {
-	var verbose bool
+	var (
+		verbose bool
+		refresh bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "install <team-name | git-url | owner/repo>",
@@ -29,9 +32,19 @@ Accepts three forms:
   atl install agentteamland/starter-extended    # owner/repo shorthand (GitHub)
   atl install https://github.com/you/team.git   # direct git URL
 
+Idempotent by default: if the team is already installed, the command exits
+with an info message and the project copies are left untouched. Pass
+--refresh to force overwrite — local changes (self-updating-learning-loop
+mutations or hand edits) are reported and discarded.
+
 If the team has an 'extends' declaration, its parent is installed recursively.
 Agents/skills/rules are merged with child-overrides-parent semantics; any names
-listed in 'excludes' are dropped from the final set.`,
+listed in 'excludes' are dropped from the final set.
+
+Routine cache updates (when the global cache pulls a newer version) are
+applied automatically by 'atl update' for unmodified copies — you don't
+need to re-install. Use --refresh only when you want to wipe your local
+modifications and start over from the cache.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
@@ -45,12 +58,21 @@ listed in 'excludes' are dropped from the final set.`,
 			result, err := team.Install(target, team.InstallOptions{
 				CWD:     cwd,
 				Verbose: verbose,
+				Refresh: refresh,
 			})
 			if err != nil {
 				return err
 			}
 
-			// Summary.
+			// No-op path: team already installed, --refresh not requested.
+			if result.Op == team.InstallStatusNoOp {
+				fmt.Println()
+				color.Green("✓ %s is already installed (no-op)", result.TopLevelName)
+				fmt.Println("   Use --refresh to force overwrite, or rely on `atl update` to refresh unmodified copies automatically.")
+				return nil
+			}
+
+			// Installed path.
 			fmt.Println()
 			color.Green("✓ installed: %s@%s", result.TopLevelName, result.TopLevelVersion)
 			if len(result.Chain) > 1 {
@@ -72,6 +94,7 @@ listed in 'excludes' are dropped from the final set.`,
 	}
 
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Print git operations and resolution details")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "Force overwrite of an already-installed team (discards local changes)")
 	return cmd
 }
 

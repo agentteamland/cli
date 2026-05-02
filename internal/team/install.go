@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/agentteamland/cli/internal/checksum"
 	"github.com/agentteamland/cli/internal/config"
 	"github.com/agentteamland/cli/internal/registry"
 	"github.com/agentteamland/cli/internal/resolver"
+	"github.com/agentteamland/cli/internal/state"
 	"github.com/fatih/color"
 )
 
@@ -19,7 +21,28 @@ import (
 type InstallOptions struct {
 	CWD     string // project directory (working dir)
 	Verbose bool
+
+	// Refresh forces overwrite of an already-installed team. Without it,
+	// `atl install <team>` is idempotent: it returns InstallStatusNoOp when
+	// the team is already present, leaving project copies untouched. With
+	// Refresh, the install proceeds and overwrites every resource — local
+	// modifications (e.g. self-updating-learning-loop mutations) are
+	// announced as "discarding local changes" before overwrite.
+	Refresh bool
 }
+
+// InstallStatus indicates how Install handled the request.
+type InstallStatus string
+
+const (
+	// InstallStatusInstalled is returned for a normal (first-time or
+	// --refresh) install where copies were materialized.
+	InstallStatusInstalled InstallStatus = "installed"
+
+	// InstallStatusNoOp is returned when the team was already installed
+	// and Refresh was not requested. Project copies were not touched.
+	InstallStatusNoOp InstallStatus = "no-op"
+)
 
 // InstallResult summarizes what Install did.
 type InstallResult struct {
@@ -30,21 +53,56 @@ type InstallResult struct {
 	SkillsCount     int
 	RulesCount      int
 	Excluded        []string
-	Status          string // e.g. "verified", "community", or ""
+	Status          string // registry status: "verified", "community", or ""
+
+	// Op describes the action Install performed (installed vs. no-op).
+	// Set to InstallStatusNoOp only when the team was already present and
+	// Refresh was not requested.
+	Op InstallStatus
+
+	// ModifiedResourceCount reports how many copies showed local changes
+	// at the moment of refresh (the "discarding local changes" count).
+	// Zero on first-time install. Populated only when Op == "installed"
+	// AND Refresh == true.
+	ModifiedResourceCount int
 }
 
 // Install resolves the given team (by name or URL), walks its extends chain,
-// materializes symlinks into the project's .claude/, and writes .team-installs.json.
+// materializes copies into the project's .claude/, and writes .team-installs.json.
+//
+// Idempotent by default: if the team is already installed (matching by
+// canonical name or slug), Install returns InstallStatusNoOp without
+// touching project copies. Pass InstallOptions.Refresh = true to force
+// overwrite — local changes (self-updating-learning-loop mutations or
+// hand edits) will be reported and discarded.
 //
 // Multi-team safe: when two installed teams declare an item with the same
-// name, the most recently installed one wins (symlink overwrite) with a
-// warning line. This mirrors npm / pip / gnu-stow semantics.
+// name, the most recently installed one wins (overwrite) with a warning
+// line. This mirrors npm / pip / gnu-stow semantics.
 //
 // `target` may be a short name, owner/repo shorthand, or a full URL. The
-// manifest entry will record the team's canonical name (from team.json), not
-// the user's input form, so subsequent commands like `atl remove <name>` and
-// `atl update <name>` work with the canonical name.
+// manifest entry records the team's canonical name (from team.json), not
+// the user's input form, so subsequent commands like `atl remove <name>`
+// and `atl update <name>` work with the canonical name.
 func Install(target string, opts InstallOptions) (*InstallResult, error) {
+	// Idempotency check: did the user already install this team?
+	if existingName, found := matchInstalledTeam(opts.CWD, target); found {
+		if !opts.Refresh {
+			return &InstallResult{
+				TopLevelName: existingName,
+				Op:           InstallStatusNoOp,
+			}, nil
+		}
+		// Refresh requested. Surface what's about to be discarded so the
+		// user sees their intent confirmed (or aborts via Ctrl+C).
+		modified := countLocalModifications(opts.CWD, existingName)
+		if modified > 0 {
+			fmt.Fprintf(os.Stderr,
+				color.YellowString("⚠ Discarding local changes (%d resource%s modified) in %s\n"),
+				modified, plural(modified), existingName)
+		}
+	}
+
 	resolved, regStatus, err := resolveAndSymlink(target, opts.CWD, opts.Verbose, true)
 	if err != nil {
 		return nil, err
@@ -52,6 +110,12 @@ func Install(target string, opts InstallOptions) (*InstallResult, error) {
 
 	// Canonical team name comes from team.json (preserved in extendsChain[0] as "name@version").
 	canonicalName := canonicalNameFromChain(resolved.ExtendsChain)
+
+	// Modified count for the result — only meaningful when Refresh was used.
+	modifiedCount := 0
+	if opts.Refresh {
+		modifiedCount = countLocalModifications(opts.CWD, canonicalName)
+	}
 
 	// Write the manifest entry under the canonical name (replacing any prior entry with the same name).
 	if err := writeManifestEntry(opts.CWD, canonicalName, resolved, regStatus); err != nil {
@@ -61,15 +125,126 @@ func Install(target string, opts InstallOptions) (*InstallResult, error) {
 	// Build result.
 	topVersion := extractVersion(resolved.ExtendsChain)
 	return &InstallResult{
-		TopLevelName:    canonicalName,
-		TopLevelVersion: topVersion,
-		Chain:           resolved.ExtendsChain,
-		AgentsCount:     len(resolved.Effective.Agents),
-		SkillsCount:     len(resolved.Effective.Skills),
-		RulesCount:      len(resolved.Effective.Rules),
-		Excluded:        resolved.Excluded,
-		Status:          regStatus,
+		TopLevelName:          canonicalName,
+		TopLevelVersion:       topVersion,
+		Chain:                 resolved.ExtendsChain,
+		AgentsCount:           len(resolved.Effective.Agents),
+		SkillsCount:           len(resolved.Effective.Skills),
+		RulesCount:            len(resolved.Effective.Rules),
+		Excluded:              resolved.Excluded,
+		Status:                regStatus,
+		Op:                    InstallStatusInstalled,
+		ModifiedResourceCount: modifiedCount,
 	}, nil
+}
+
+// matchInstalledTeam reports whether the given target (which may be a short
+// name, owner/repo shorthand, or URL) corresponds to a team already in the
+// project's manifest. Returns the canonical team name if matched.
+func matchInstalledTeam(cwd, target string) (string, bool) {
+	m, err := List(cwd)
+	if err != nil {
+		return "", false
+	}
+	for _, t := range m.Teams {
+		if t.Name == target {
+			return t.Name, true
+		}
+	}
+	// Try slug derivation: take the last "/"-separated segment, strip
+	// ".git" suffix. Catches "owner/repo" and full git URLs.
+	slug := slugFromTarget(target)
+	if slug == "" {
+		return "", false
+	}
+	for _, t := range m.Teams {
+		if t.Name == slug {
+			return t.Name, true
+		}
+	}
+	return "", false
+}
+
+// slugFromTarget extracts the likely team name from inputs like
+// "agentteamland/design-system-team", "https://github.com/x/y.git", etc.
+// Returns the empty string for inputs that already look like bare names.
+func slugFromTarget(target string) string {
+	last := target
+	for i := len(target) - 1; i >= 0; i-- {
+		if target[i] == '/' {
+			last = target[i+1:]
+			break
+		}
+	}
+	if last == target {
+		return ""
+	}
+	if strings.HasSuffix(last, ".git") {
+		last = strings.TrimSuffix(last, ".git")
+	}
+	return last
+}
+
+// countLocalModifications walks the given installed team's resources and
+// returns how many project copies have content hashes that diverge from
+// the manifest's installed-time baseline. Used to surface the
+// "discarding local changes" message before a --refresh overwrite.
+func countLocalModifications(cwd, teamName string) int {
+	m, err := List(cwd)
+	if err != nil {
+		return 0
+	}
+	var t *InstalledTeam
+	for i := range m.Teams {
+		if m.Teams[i].Name == teamName {
+			t = &m.Teams[i]
+			break
+		}
+	}
+	if t == nil || t.InstalledChecksums == nil {
+		return 0
+	}
+	projectClaude := config.ProjectClaudeDir(cwd)
+	count := 0
+	for kind, names := range t.Effective {
+		for _, name := range names {
+			expected := ""
+			if t.InstalledChecksums[kind] != nil {
+				expected = t.InstalledChecksums[kind][name]
+			}
+			if expected == "" {
+				continue
+			}
+			path, srcKind := resourcePath(kind, name, projectClaude)
+			if path == "" {
+				continue
+			}
+			modified, err := state.IsResourceModified(path, expected, srcKind)
+			if err == nil && modified {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func resourcePath(kind, name, projectClaude string) (string, state.ResourceKind) {
+	switch kind {
+	case "agents":
+		return filepath.Join(projectClaude, "agents", name+".md"), state.KindFile
+	case "rules":
+		return filepath.Join(projectClaude, "rules", name+".md"), state.KindFile
+	case "skills":
+		return filepath.Join(projectClaude, "skills", name), state.KindDir
+	}
+	return "", state.KindFile
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // canonicalNameFromChain returns the team's canonical name from its extends

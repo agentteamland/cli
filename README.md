@@ -178,7 +178,13 @@ Open a PR against [agentteamland/registry](https://github.com/agentteamland/regi
 
 ## Status
 
-**Current: v1.1.1** — learning-capture noise filter (assistant-role + kebab-case topic regex). Closes a SessionStart over-report bug where any session that *discussed* the marker format inflated the next session's count by 10-25× (149 raw substring hits → 16 real markers across 5 workspace transcripts in the validation sweep).
+**Current: v1.1.4** — test coverage backfill (35 new test functions). `internal/checksum` 0 → 85.7%, `internal/updater` helpers 0 → 11.3%, `cmd/atl/commands` setup_hooks helpers 0 → 6.9%. Style follow-up: `gofmt` of new test files. Shipped via `cli#16` + `cli#17`.
+
+**v1.1.3** — per-marker hash dedup at the state-file layer (closes the long-session re-report bug from the platform-wide review). New `atl learning-capture --commit-from-transcripts` mode: `/save-learnings` calls this on success, `atl` records per-marker hashes in `~/.claude/state/learning-capture-state.json` (FIFO-capped at 5000), so the next `SessionStart` does not re-report markers that were already processed inside the same long-running session. Atomic state-file write via the same `config.WriteJSONAtomic` helper used by `.team-installs.json`. Paired with `core@1.10.0` (which delegates state-file maintenance to this CLI mode in `/save-learnings` step 12). Bumps `requires.atl` to `>=1.1.3` for `core` and downstream teams that rely on `--commit-from-transcripts`.
+
+**v1.1.2** — atomic `.team-installs.json` writes via new `config.WriteJSONAtomic` helper (corruption-on-crash protection), slug flag-injection guard on `atl install` (refuses team names that look like CLI flags), `atl install` scan-error surfacing (errors no longer eaten silently). README v1.1.x rewrite. Closes the platform-wide review's HIGH H-2 + HIGH H-4 + MEDIUM H-7 items.
+
+**v1.1.1** — learning-capture noise filter (assistant-role + kebab-case topic regex). Closes a SessionStart over-report bug where any session that *discussed* the marker format inflated the next session's count by 10-25× (149 raw substring hits → 16 real markers across 5 workspace transcripts in the validation sweep).
 
 **v1.1.0** — Phase 2.A of self-updating-learning-loop:
   - **`atl session-start` composite wrapper** — boot-time tasks in one command (cache pull + previous-transcript marker scan + atl-version check). Wired into Claude Code's `SessionStart` hook by `atl setup-hooks`.

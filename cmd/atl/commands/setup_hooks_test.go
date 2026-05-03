@@ -223,8 +223,8 @@ func TestIsAtlGroup_FalseForUserCommand(t *testing.T) {
 		"echo hello",
 		"/path/to/user-script.sh",
 		"npm test",
-		"atld",      // looks like atl but isn't (no space)
-		"atlas",     // also not atl
+		"atld",  // looks like atl but isn't (no space)
+		"atlas", // also not atl
 	}
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
@@ -300,8 +300,8 @@ func TestEnsureMap_ReplacesNonMap(t *testing.T) {
 
 func TestAsArray_Variants(t *testing.T) {
 	cases := []struct {
-		name   string
-		in     interface{}
+		name    string
+		in      interface{}
 		wantLen int
 	}{
 		{"nil", nil, 0},

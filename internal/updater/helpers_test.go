@@ -43,10 +43,10 @@ func TestIsNewerVersion(t *testing.T) {
 		{"1.2.3", "1.2.4", false},
 		{"2.0.0", "1.99.99", true},
 		{"1.2.3", "1.1.99", true},
-		{"v1.2.3", "1.2.2", true},   // v-prefix tolerated
-		{"1.2.3", "v1.2.2", true},   // either side
+		{"v1.2.3", "1.2.2", true},     // v-prefix tolerated
+		{"1.2.3", "v1.2.2", true},     // either side
 		{"1.2.3-rc1", "1.2.3", false}, // pre-release stripping = equal
-		{"", "1.2.3", false},        // empty latest = nothing newer
+		{"", "1.2.3", false},          // empty latest = nothing newer
 	}
 	for _, tc := range cases {
 		t.Run(tc.latest+"_vs_"+tc.current, func(t *testing.T) {

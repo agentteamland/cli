@@ -64,10 +64,10 @@ func TestDirSHA256_DeterministicOrder(t *testing.T) {
 	dirB := t.TempDir()
 
 	files := map[string]string{
-		"alpha.txt":          "first content",
-		"beta/nested.txt":    "nested content",
-		"zeta.md":            "last content",
-		"beta/another.json":  "another",
+		"alpha.txt":         "first content",
+		"beta/nested.txt":   "nested content",
+		"zeta.md":           "last content",
+		"beta/another.json": "another",
 	}
 	for rel, content := range files {
 		for _, root := range []string{dirA, dirB} {

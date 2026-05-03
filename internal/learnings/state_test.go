@@ -23,7 +23,7 @@ func TestMarkerHash_Stable(t *testing.T) {
 func TestMarkerHash_FieldsMatter(t *testing.T) {
 	base := MarkerHash("auth-refresh", "decision", "body")
 	cases := []struct {
-		name             string
+		name              string
 		topic, kind, body string
 	}{
 		{"different topic", "auth-token", "decision", "body"},

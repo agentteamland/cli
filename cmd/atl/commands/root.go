@@ -41,6 +41,7 @@ Docs:     https://github.com/agentteamland`,
 		NewSetupHooks(),
 		NewSessionStart(),
 		NewLearningCapture(),
+		NewDocsSync(),
 	)
 
 	return root

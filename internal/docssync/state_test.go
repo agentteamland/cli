@@ -109,7 +109,7 @@ func TestAddProcessedMarkers_DeduplicatesAndCaps(t *testing.T) {
 	withTempHome(t)
 	var s State
 
-	s.AddProcessedMarkers("p", []string{"a", "b", "a", "c"}, /* duplicates */)
+	s.AddProcessedMarkers("p", []string{"a", "b", "a", "c"} /* duplicates */)
 	got := s.Projects["p"].ProcessedMarkers
 	want := []string{"a", "b", "c"}
 	if !reflect.DeepEqual(got, want) {

@@ -28,6 +28,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Fine-grained PAT with contents:write on agentteamland/{homebrew-tap,scoop-bucket,winget-pkgs}.
+          # Fine-grained PAT with contents:write on agentteamland/{homebrew-tap,scoop-bucket}.
           # Goreleaser uses this to push formula/manifest updates on tag.
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

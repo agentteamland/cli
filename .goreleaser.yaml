@@ -45,7 +45,7 @@ archives:
 #      uninstalls cleanly.
 #   2. Re-enable this block, CI apt-installs msitools, MSI ships on each tag.
 # Until then, Windows users install via scripts/install.ps1 one-liner (zero
-# package-manager prerequisites) or scoop / winget (once winget PR merges).
+# package-manager prerequisites) or scoop bucket.
 #
 # msi:
 #   - id: atl-msi
@@ -97,52 +97,17 @@ scoops:
       email: noreply@agentteamland.com
     commit_msg_template: "chore: bump atl to {{ .Tag }}"
 
-# Winget — pushes manifest updates to agentteamland/winget-pkgs (our fork of
-# microsoft/winget-pkgs) on each tag. We do NOT auto-open the PR to
-# microsoft/winget-pkgs from CI; that step has historically failed with a
-# 403 ("Resource not accessible by personal access token") because creating
-# cross-fork PRs requires a PAT scope we don't want to grant to CI.
+# Winget — channel removed 2026-05-06. Decision in workspace
+# .claude/docs/winget-channel-removal.md. Reasons (summary): per-release manual
+# upstream PR to microsoft/winget-pkgs, CLA + Microsoft reviewer queue,
+# fork-master byte-for-byte discipline policing, marginal audience benefit
+# for a developer-focused CLI. Three remaining Windows channels (scoop bucket
+# above, GitHub Releases zip via archives:, scripts/install.ps1) cover the
+# audience without per-release maintenance.
 #
-# The manifest is ready-to-go in agentteamland/winget-pkgs; when we want to
-# publish a new version on winget, we open the PR manually (or via gh CLI
-# from a local terminal where we're logged in). This is acceptable for now
-# — winget publishing cadence is coarser than brew/scoop anyway, and the
-# first Microsoft review has to clear before auto-updates matter.
-#
-# To re-enable automatic PR creation later:
-#   1. Provision a PAT with `public_repo` scope (classic PAT) or fine-grained
-#      with PR creation on microsoft/winget-pkgs (note: Microsoft does not
-#      grant fine-grained access to their repo, so classic PAT is the path)
-#   2. Store as TAP_GITHUB_TOKEN or a new WINGET_PR_TOKEN secret
-#   3. Flip `pull_request.enabled` back to true
-winget:
-  - name: atl
-    publisher: agentteamland
-    license: MIT
-    homepage: "https://github.com/agentteamland/cli"
-    description: "AgentTeamLand package manager CLI — install teams, scaffold projects"
-    short_description: "AgentTeamLand CLI"
-    package_identifier: "agentteamland.atl"
-    publisher_support_url: "https://github.com/agentteamland/cli/issues"
-    publisher_url: "https://github.com/agentteamland"
-    copyright: "Copyright (c) 2026 AgentTeamLand"
-    release_notes_url: "https://github.com/agentteamland/cli/releases/tag/{{ .Tag }}"
-    tags:
-      - cli
-      - package-manager
-      - ai-agents
-      - devtool
-    commit_author:
-      name: agentteamland-bot
-      email: noreply@agentteamland.com
-    commit_msg_template: "chore: update atl to {{ .Version }}"
-    repository:
-      owner: agentteamland
-      name: winget-pkgs
-      branch: "atl-{{ .Version }}"
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-      pull_request:
-        enabled: false        # Re-enable once we have a PAT with PR-creation scope on microsoft/winget-pkgs
+# Reversibility: restore by re-adding the goreleaser winget: block (single
+# revert) and unarchiving the agentteamland/winget-pkgs fork. Older merged
+# versions (v0.1.1, v0.2.0, v1.1.4) remain in Microsoft's catalog regardless.
 
 changelog:
   sort: asc

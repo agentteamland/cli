@@ -109,17 +109,11 @@ func detectUpgradeCommand() string {
 		return "scoop update atl"
 	}
 
-	// Winget install paths (Windows).
-	if strings.Contains(strings.ToLower(exeAbs), "\\winget\\") ||
-		strings.Contains(strings.ToLower(exeAbs), "\\packages\\agentteamland.atl") {
-		return "winget upgrade agentteamland.atl"
-	}
-
 	return defaultUpgradeCommand()
 }
 
 func defaultUpgradeCommand() string {
-	// On Windows without scoop/winget signals, default to scoop (most common).
+	// On Windows without a scoop signal, default to scoop (most common).
 	if runtime.GOOS == "windows" {
 		return "scoop update atl"
 	}

@@ -222,6 +222,23 @@ func LoadAtlConfigFile(path string) (map[string]any, bool, error) {
 	return raw, true, nil
 }
 
+// WriteAtlConfigFile writes cfg atomically to path. The file is always
+// fully populated (every schemaVersion-1 field present), per the
+// brainstorm's "Schema defaults still get written to disk" rule. The
+// parent directory is created on demand.
+//
+// Validation runs before write — invalid configs are rejected so we
+// never put a known-bad file on disk.
+func WriteAtlConfigFile(path string, cfg AtlConfig) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate before write: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	}
+	return WriteJSONAtomic(path, cfg)
+}
+
 // LoadEffectiveAtlConfig returns defaults <- global <- project, merged at
 // the field level (deep merge). projectRoot may be empty to skip the
 // project layer. Missing files (global or project) are silently treated

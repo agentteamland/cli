@@ -218,7 +218,7 @@ func TestWriteState_AtomicAndRoundtrip(t *testing.T) {
 	}
 
 	// No leftover temp file in the state directory (atomic rename cleaned up).
-	stateDir := filepath.Join(tmp, ".claude", "state")
+	stateDir := filepath.Join(tmp, ".atl", "state")
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
 		t.Fatalf("read state dir: %v", err)
@@ -250,7 +250,7 @@ func TestReadState_MalformedJSON_ReturnsEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	statePath := filepath.Join(tmp, ".claude", "state", "learning-capture-state.json")
+	statePath := filepath.Join(tmp, ".atl", "state", "learning-capture-state.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

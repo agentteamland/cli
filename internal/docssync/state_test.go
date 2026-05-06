@@ -33,7 +33,7 @@ func TestStateFilePath_Locates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StateFilePath: %v", err)
 	}
-	want := filepath.Join(tmp, ".claude", "state", "docs-sync-state.json")
+	want := filepath.Join(tmp, ".atl", "state", "docs-sync-state.json")
 	if got != want {
 		t.Errorf("path = %q, want %q", got, want)
 	}
@@ -52,7 +52,7 @@ func TestReadState_MissingFileReturnsEmpty(t *testing.T) {
 
 func TestReadState_MalformedJSONReturnsEmpty(t *testing.T) {
 	tmp := withTempHome(t)
-	path := filepath.Join(tmp, ".claude", "state", "docs-sync-state.json")
+	path := filepath.Join(tmp, ".atl", "state", "docs-sync-state.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -98,8 +98,8 @@ func TestWriteState_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch:\n got=%+v\nwant=%+v", got, want)
 	}
 
-	// Verify file landed under $HOME/.claude/state/.
-	path := filepath.Join(tmp, ".claude", "state", "docs-sync-state.json")
+	// Verify file landed under $HOME/.atl/state/ (post-migration canonical).
+	path := filepath.Join(tmp, ".atl", "state", "docs-sync-state.json")
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("state file not at expected location: %v", err)
 	}

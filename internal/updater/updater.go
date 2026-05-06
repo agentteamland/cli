@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/config"
 )
 
@@ -77,10 +78,10 @@ func Run(opts Options) *Result {
 	}
 
 	// Repo updates (throttled).
-	if throttleGate(repoStampPath(), opts.RepoThrottle) {
+	if throttleGate(repoStampReadPath(), opts.RepoThrottle) {
 		res.Repos = updateAllRepos(opts.CheckOnly, opts.Verbose)
 		if !opts.CheckOnly {
-			_ = touchStamp(repoStampPath())
+			_ = touchStamp(repoStampWritePath())
 		}
 	} else {
 		res.ThrottledRepos = true
@@ -88,7 +89,7 @@ func Run(opts Options) *Result {
 
 	// Self-check (independently throttled, larger default).
 	if !opts.SkipSelfCheck {
-		if throttleGate(selfStampPath(), opts.SelfThrottle) {
+		if throttleGate(selfStampReadPath(), opts.SelfThrottle) {
 			latest, upgradeCmd, err := checkLatestRelease()
 			res.SelfLatest = latest
 			res.SelfUpgradeCmd = upgradeCmd
@@ -97,7 +98,7 @@ func Run(opts Options) *Result {
 				res.SelfOutdated = true
 			}
 			if err == nil {
-				_ = touchStamp(selfStampPath())
+				_ = touchStamp(selfStampWritePath())
 			}
 		} else {
 			res.ThrottledSelf = true
@@ -331,10 +332,29 @@ func touchStamp(stampPath string) error {
 	return f.Close()
 }
 
-func repoStampPath() string {
-	return filepath.Join(config.ClaudeHome(), "cache", "atl-last-repo-check")
+// repoStampWritePath returns the canonical (post-migration) location for
+// the repo-cache throttle stamp: ~/.atl/cache/last-repo-check.
+func repoStampWritePath() string {
+	return filepath.Join(config.AtlHome(), "cache", "last-repo-check")
 }
 
-func selfStampPath() string {
-	return filepath.Join(config.ClaudeHome(), "cache", "atl-last-self-check")
+// repoStampReadPath returns the path to consult when deciding whether
+// the throttle has elapsed. New path wins, legacy ~/.claude/ path is
+// the fallback during the migration window (5 minor versions per the
+// atl-config-system decision).
+func repoStampReadPath() string {
+	legacy := filepath.Join(config.ClaudeHome(), "cache", "atl-last-repo-check")
+	return atlmigrate.Resolve(legacy, repoStampWritePath())
+}
+
+// selfStampWritePath returns the canonical location for the self-check
+// throttle stamp: ~/.atl/cache/last-self-check.
+func selfStampWritePath() string {
+	return filepath.Join(config.AtlHome(), "cache", "last-self-check")
+}
+
+// selfStampReadPath mirrors repoStampReadPath for the self-check stamp.
+func selfStampReadPath() string {
+	legacy := filepath.Join(config.ClaudeHome(), "cache", "atl-last-self-check")
+	return atlmigrate.Resolve(legacy, selfStampWritePath())
 }

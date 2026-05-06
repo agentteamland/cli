@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/config"
 	"github.com/agentteamland/cli/internal/team"
 	"github.com/fatih/color"
@@ -101,16 +102,22 @@ modifications and start over from the cache.`,
 // maybeOfferHookSetup is a one-time prompt on the first successful atl install:
 // asks the user whether they want automatic update checks on Claude Code
 // session start + every user prompt (throttled). Writes the answer to
-// ~/.claude/atl-install-marker.json so we never prompt again.
+// ~/.atl/install-marker.json so we never prompt again. The legacy
+// ~/.claude/atl-install-marker.json is read as a fallback during the
+// migration window (5 minor versions per the atl-config-system decision).
 //
 // This runs AFTER the install succeeds so users only see it when their first
 // install actually worked.
 func maybeOfferHookSetup() {
-	markerPath := filepath.Join(config.ClaudeHome(), "atl-install-marker.json")
-	if _, err := os.Stat(markerPath); err == nil {
+	markerWrite := filepath.Join(config.AtlHome(), "install-marker.json")
+	markerLegacy := filepath.Join(config.ClaudeHome(), "atl-install-marker.json")
+	markerRead := atlmigrate.Resolve(markerLegacy, markerWrite)
+	if _, err := os.Stat(markerRead); err == nil {
 		// Not first install — already prompted at some point.
 		return
 	}
+	// Future writes always go to the new path.
+	markerPath := markerWrite
 
 	// Non-interactive stdin (pipe / CI) → skip the prompt silently and record
 	// the marker so we don't spam later.

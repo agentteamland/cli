@@ -2,8 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/updater"
 	"github.com/spf13/cobra"
 )
@@ -60,6 +62,14 @@ For routine "I want a fresh refresh in this conversation" use cases, see
 the /refresh skill (PR 2A.4) which calls this command with verbose output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Step 0: state-file migration (idempotent). Per the
+			// atl-config-system decision, atl owns ~/.atl/ and the
+			// 5 legacy ~/.claude/ state files move to it. Auto-triggered
+			// here so users never need to invoke `atl migrate` manually.
+			if migResult, migErr := atlmigrate.Migrate(os.Stderr); migErr != nil {
+				fmt.Fprintf(os.Stderr, "atl session-start: state-file migration reported %d failure(s); continuing\n", len(migResult.Failed))
+			}
+
 			// Step 1: cache pull. Self-check stays at 24h regardless of
 			// throttle (binary releases are weekly at most; checking
 			// every session start would spam GitHub).

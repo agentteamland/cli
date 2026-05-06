@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/team"
 	"github.com/agentteamland/cli/internal/updater"
 	"github.com/fatih/color"
@@ -80,6 +81,13 @@ form; the per-team mode is preserved for compatibility.`,
 			}
 
 			// ---- modern full-cache mode -----------------------------------
+			// Pre-flight: auto-migrate state files from ~/.claude/ to ~/.atl/
+			// (per atl-config-system decision). Idempotent — clean homes
+			// no-op silently.
+			if migResult, migErr := atlmigrate.Migrate(os.Stderr); migErr != nil {
+				fmt.Fprintf(os.Stderr, "atl update: state-file migration reported %d failure(s); continuing\n", len(migResult.Failed))
+			}
+
 			throttleDur := time.Duration(0)
 			if throttle != "" {
 				d, err := updater.ParseDuration(throttle)

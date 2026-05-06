@@ -42,6 +42,7 @@ Docs:     https://github.com/agentteamland`,
 		NewSessionStart(),
 		NewLearningCapture(),
 		NewDocsSync(),
+		NewMigrate(),
 	)
 
 	return root

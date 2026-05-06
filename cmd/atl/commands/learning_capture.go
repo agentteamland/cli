@@ -93,7 +93,7 @@ every Claude Code session start. The output appears in Claude's
 additionalContext, prompting /save-learnings --from-markers --transcripts
 ... auto-application.
 
-State file (~/.claude/state/learning-capture-state.json) records the
+State file (~/.atl/state/learning-capture-state.json; legacy ~/.claude/state/learning-capture-state.json read as fallback) records the
 last successful save-learnings run per project AND the FIFO-capped set
 of marker hashes that have already been processed. The CLI writes the
 state ONLY via --commit-from-transcripts (called by /save-learnings on

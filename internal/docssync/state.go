@@ -13,7 +13,9 @@
 // tmp + rename via config.WriteJSONAtomic). The next session simply
 // re-reports the same markers — no work is lost, no work is hidden.
 //
-// State file location: ~/.claude/state/docs-sync-state.json
+// State file location: ~/.atl/state/docs-sync-state.json
+// (legacy ~/.claude/state/docs-sync-state.json is read as fallback during
+// the migration window, per the atl-config-system decision).
 // Schema:
 //
 //	{
@@ -44,6 +46,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/config"
 )
 
@@ -100,9 +103,23 @@ type CoverageBaseline struct {
 	Agents []string `json:"agents"`
 }
 
-// StateFilePath returns the canonical location of the state file.
+// StateFilePath returns the canonical (write) location of the state file
+// at the new ~/.atl/state/ location. Reads should go through the
+// migration-window-aware Resolve in ReadState.
 // Resolves $HOME at call time; never caches.
 func StateFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".atl", "state", "docs-sync-state.json"), nil
+}
+
+// legacyStateFilePath returns the pre-atl-config-system location
+// (~/.claude/state/docs-sync-state.json). Read sites use Resolve over
+// the legacy + canonical pair so unmigrated installs keep working until
+// atlmigrate.Migrate has been auto-triggered.
+func legacyStateFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -115,11 +132,15 @@ func StateFilePath() (string, error) {
 // also treated as empty (we don't fail the user's session for a
 // corrupt state file; worst case we re-process some markers).
 func ReadState() (State, error) {
-	path, err := StateFilePath()
+	newPath, err := StateFilePath()
 	if err != nil {
 		return emptyState(), err
 	}
-	data, err := os.ReadFile(path)
+	oldPath, err := legacyStateFilePath()
+	if err != nil {
+		return emptyState(), err
+	}
+	data, err := os.ReadFile(atlmigrate.Resolve(oldPath, newPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return emptyState(), nil

@@ -68,7 +68,7 @@ This CLI command persists what the skill processed:
 
 Each flag is independent — the skill passes only the fields it advanced.
 
-State file: ~/.claude/state/docs-sync-state.json
+State file: ~/.atl/state/docs-sync-state.json (legacy ~/.claude/state/docs-sync-state.json read as fallback during the migration window)
 Schema documented at internal/docssync/state.go`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !commitFromState {
@@ -84,7 +84,7 @@ Schema documented at internal/docssync/state.go`,
 		},
 	}
 
-	cmd.Flags().BoolVar(&commitFromState, "commit-from-state", false, "Commit processed-state values to ~/.claude/state/docs-sync-state.json")
+	cmd.Flags().BoolVar(&commitFromState, "commit-from-state", false, "Commit processed-state values to ~/.atl/state/docs-sync-state.json")
 	cmd.Flags().StringVar(&markerHashes, "marker-hashes", "", "Comma-separated marker hashes to add to processedMarkers (FIFO-capped)")
 	cmd.Flags().BoolVar(&markerDrainStamp, "marker-drain-stamp", false, "Advance lastMarkerDrain to now (UTC)")
 	cmd.Flags().BoolVar(&fullAuditStamp, "full-audit-stamp", false, "Advance lastFullAudit to now (UTC)")

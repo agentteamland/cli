@@ -1,7 +1,7 @@
 // Package atlmigrate moves atl's per-user state files from their legacy
 // location under ~/.claude/ to ~/.atl/, the new dedicated atl directory.
 //
-// Five files migrate (decision: workspace .claude/docs/atl-config-system.md
+// Five files migrate (decision: workspace .atl/docs/atl-config-system.md
 // § State-file migration):
 //
 //	~/.claude/state/learning-capture-state.json -> ~/.atl/state/learning-capture-state.json

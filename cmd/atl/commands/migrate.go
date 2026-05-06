@@ -11,7 +11,7 @@ import (
 // NewMigrate builds the `atl migrate` command.
 //
 // Per the atl-config-system decision (workspace
-// .claude/docs/atl-config-system.md § State-file migration), atl owns a
+// .atl/docs/atl-config-system.md § State-file migration), atl owns a
 // dedicated ~/.atl/ tree. Five state files move from their legacy
 // ~/.claude/ locations:
 //
@@ -49,7 +49,7 @@ The migration is idempotent — files already at the new location are
 skipped, files that never existed are skipped, and re-running on a
 fully-migrated home prints nothing.
 
-Decision context: workspace .claude/docs/atl-config-system.md.`,
+Decision context: workspace .atl/docs/atl-config-system.md.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var sink = os.Stderr
 			if !verbose {

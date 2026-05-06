@@ -19,7 +19,7 @@ import (
 //  1. atl update --silent-if-clean   (cache pull)
 //  2. per-project steps              (migration + auto-refresh)
 //
-// Future steps (per .claude/docs/self-updating-learning-loop.md Q1):
+// Future steps (per .atl/docs/self-updating-learning-loop.md Q1):
 //
 //  3. atl learning-capture --previous-transcripts (PR 2A.2)
 //

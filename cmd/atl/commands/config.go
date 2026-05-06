@@ -4,7 +4,7 @@ import "github.com/spf13/cobra"
 
 // NewConfig builds the `atl config` subcommand tree.
 //
-// Subcommands (per workspace .claude/docs/atl-config-system.md):
+// Subcommands (per workspace .atl/docs/atl-config-system.md):
 //
 //	atl config init                # first-time welcome + Q&A → write ~/.atl/config.json
 //	atl config edit                # Q&A on existing global config
@@ -31,7 +31,7 @@ capture settings, and the brainstorm marker bullet cap. See
 https://agentteamland.github.io/docs (when published) for the per-key
 reference and the keystone test ("config vs rule vs hardcode").
 
-Decision context: workspace .claude/docs/atl-config-system.md.`,
+Decision context: workspace .atl/docs/atl-config-system.md.`,
 	}
 
 	cmd.AddCommand(

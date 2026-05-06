@@ -4,7 +4,7 @@
 // ~/.atl/config.json (global) and <project>/.atl/config.json. The schema
 // source-of-truth is agentteamland/core's schemas/atl-config.schema.json
 // (added in core@1.14.0). Decision context: workspace
-// .claude/docs/atl-config-system.md (decided 2026-05-06).
+// .atl/docs/atl-config-system.md (decided 2026-05-06).
 //
 // PR 2 (this) provides load + merge + validate for schemaVersion 1 only.
 // Migration of older schema versions to v1 lands in PR 3 (atl migrate).

@@ -29,7 +29,7 @@ import (
 // Code v2.1.x docs — only SessionStart / UserPromptSubmit / UserPromptExpansion
 // deliver additionalContext. Marker capture moved to SessionStart via the
 // session-start wrapper, where the report is actually visible to Claude.
-// See .claude/wiki/claude-code-hook-output-events.md.
+// See .atl/wiki/claude-code-hook-output-events.md.
 //
 // The merge is idempotent: re-running replaces only atl-owned hook entries
 // (any command starting with "atl "), preserving any other hooks the user

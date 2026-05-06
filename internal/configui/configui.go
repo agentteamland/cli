@@ -1,6 +1,6 @@
 // Package configui implements the Bubbletea-driven Q&A flow that powers
 // `atl config init` and `atl config edit`. Per the atl-config-system
-// decision (workspace .claude/docs/atl-config-system.md § Welcome /
+// decision (workspace .atl/docs/atl-config-system.md § Welcome /
 // install Q&A UX) this asks the 9 user-tunable keys one screen at a
 // time, with a summary at the end.
 //

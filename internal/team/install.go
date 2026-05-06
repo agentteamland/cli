@@ -329,7 +329,7 @@ func resolveAndSymlink(target, cwd string, verbose, warnCollisions bool) (*resol
 	// ~/.claude/repos/agentteamland/{team}/, where the user has no push
 	// permission and the next `atl update` would collide on git pull.
 	// Project-local copies isolate mutations cleanly. See:
-	// .claude/docs/install-mechanism-redesign.md (Q1).
+	// .atl/docs/install-mechanism-redesign.md (Q1).
 	//
 	// Trade-off: copies become stale relative to the global cache. Compensated
 	// by `atl update`'s auto-refresh-of-unmodified-projects step (Q3),

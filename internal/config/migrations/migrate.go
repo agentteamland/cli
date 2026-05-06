@@ -10,7 +10,7 @@
 // dedicated source file (migrate_v1_to_v2.go) without cross-cutting
 // changes to load logic.
 //
-// Decision context: workspace .claude/docs/atl-config-system.md
+// Decision context: workspace .atl/docs/atl-config-system.md
 // § Schema versioning.
 package migrations
 

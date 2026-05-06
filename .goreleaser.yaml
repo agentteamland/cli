@@ -98,7 +98,7 @@ scoops:
     commit_msg_template: "chore: bump atl to {{ .Tag }}"
 
 # Winget — channel removed 2026-05-06. Decision in workspace
-# .claude/docs/winget-channel-removal.md. Reasons (summary): per-release manual
+# .atl/docs/winget-channel-removal.md. Reasons (summary): per-release manual
 # upstream PR to microsoft/winget-pkgs, CLA + Microsoft reviewer queue,
 # fork-master byte-for-byte discipline policing, marginal audience benefit
 # for a developer-focused CLI. Three remaining Windows channels (scoop bucket

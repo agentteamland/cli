@@ -102,7 +102,7 @@ modifications and start over from the cache.`,
 
 // maybeFirstInstallFlow runs the one-shot first-install onboarding after a
 // successful `atl install`. Two prompts in sequence (per the
-// atl-config-system decision, workspace .claude/docs/atl-config-system.md):
+// atl-config-system decision, workspace .atl/docs/atl-config-system.md):
 //
 //  1. atl config init — Bubbletea Q&A populating ~/.atl/config.json with
 //     the 9 user-tunable keys. Cancelled flow leaves config absent.

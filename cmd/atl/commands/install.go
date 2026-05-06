@@ -10,6 +10,7 @@ import (
 
 	"github.com/agentteamland/cli/internal/atlmigrate"
 	"github.com/agentteamland/cli/internal/config"
+	"github.com/agentteamland/cli/internal/configui"
 	"github.com/agentteamland/cli/internal/team"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -89,7 +90,7 @@ modifications and start over from the cache.`,
 			}
 
 			// First-install opt-in for auto-update hooks.
-			maybeOfferHookSetup()
+			maybeFirstInstallFlow()
 			return nil
 		},
 	}
@@ -99,16 +100,26 @@ modifications and start over from the cache.`,
 	return cmd
 }
 
-// maybeOfferHookSetup is a one-time prompt on the first successful atl install:
-// asks the user whether they want automatic update checks on Claude Code
-// session start + every user prompt (throttled). Writes the answer to
-// ~/.atl/install-marker.json so we never prompt again. The legacy
-// ~/.claude/atl-install-marker.json is read as a fallback during the
-// migration window (5 minor versions per the atl-config-system decision).
+// maybeFirstInstallFlow runs the one-shot first-install onboarding after a
+// successful `atl install`. Two prompts in sequence (per the
+// atl-config-system decision, workspace .claude/docs/atl-config-system.md):
+//
+//  1. atl config init — Bubbletea Q&A populating ~/.atl/config.json with
+//     the 9 user-tunable keys. Cancelled flow leaves config absent.
+//  2. atl setup-hooks prompt — single y/N asking whether to wire the
+//     SessionStart + UserPromptSubmit hooks in Claude Code's settings.json.
+//
+// Gated by ~/.atl/install-marker.json (legacy ~/.claude/atl-install-marker.json
+// read as fallback). The marker is written at the end regardless of the user's
+// choices — "user's choice respected; not nagged." Cancelled welcome still
+// writes the marker.
+//
+// Non-interactive stdin (pipe / CI) → skip both prompts silently and write
+// the marker so future runs don't spam.
 //
 // This runs AFTER the install succeeds so users only see it when their first
 // install actually worked.
-func maybeOfferHookSetup() {
+func maybeFirstInstallFlow() {
 	markerWrite := filepath.Join(config.AtlHome(), "install-marker.json")
 	markerLegacy := filepath.Join(config.ClaudeHome(), "atl-install-marker.json")
 	markerRead := atlmigrate.Resolve(markerLegacy, markerWrite)
@@ -116,22 +127,68 @@ func maybeOfferHookSetup() {
 		// Not first install — already prompted at some point.
 		return
 	}
-	// Future writes always go to the new path.
-	markerPath := markerWrite
 
-	// Non-interactive stdin (pipe / CI) → skip the prompt silently and record
+	// Non-interactive stdin (pipe / CI) → skip both prompts silently and record
 	// the marker so we don't spam later.
 	if !isTerminal(os.Stdin) {
-		_ = writeMarker(markerPath, "non-interactive-skip")
+		_ = writeMarker(markerWrite, "non-interactive-skip")
 		return
 	}
 
+	configOutcome := runFirstInstallConfigInit()
+	hooksOutcome := runFirstInstallHookSetup()
+
+	_ = writeMarker(markerWrite, fmt.Sprintf("config:%s,hooks:%s", configOutcome, hooksOutcome))
+}
+
+// runFirstInstallConfigInit runs the atl config init Q&A flow. Returns a
+// short outcome label embedded in the install marker for telemetry / debug.
+//
+// If ~/.atl/config.json already exists, the Q&A is skipped (we don't
+// overwrite a config the user (or a previous install) already wrote).
+func runFirstInstallConfigInit() string {
+	configPath := config.GlobalAtlConfigPath()
+	if _, err := os.Stat(configPath); err == nil {
+		// Config already exists — don't auto-overwrite.
+		return "preexisting"
+	}
+
 	fmt.Println()
-	color.Cyan("First time using atl on this machine? Want automatic update checks?")
-	fmt.Println("  Claude Code will run `atl update --silent-if-clean` on:")
-	fmt.Println("    • every session start (instant, always fresh)")
-	fmt.Println("    • every user message (throttled to once per 30m)")
-	fmt.Println("  Teams, core, global skills, and the atl binary all stay current.")
+	color.Cyan("First time using atl on this machine? Let's set up your config.")
+	fmt.Println("  9 short questions populate ~/.atl/config.json with your preferences.")
+	fmt.Println("  Defaults are sensible — press Enter on each to keep them.")
+	fmt.Println("  You can re-run anytime with `atl config edit`.")
+	fmt.Println()
+
+	result, err := configui.Run(configui.ModeInit, config.DefaultAtlConfig(), configPath)
+	if err != nil {
+		color.Yellow("⚠ config Q&A failed: %v", err)
+		color.Yellow("  You can retry later with `atl config init`.")
+		return "qa-error"
+	}
+	if !result.Saved {
+		fmt.Println("  Config setup cancelled — no file written. Run `atl config init` later if you change your mind.")
+		return "cancelled"
+	}
+	if err := config.WriteAtlConfigFile(configPath, result.Cfg); err != nil {
+		color.Yellow("⚠ could not write %s: %v", configPath, err)
+		return "write-error"
+	}
+	color.Green("✓ wrote %s", configPath)
+	return "saved"
+}
+
+// runFirstInstallHookSetup prompts the user once to enable the
+// SessionStart + UserPromptSubmit hooks in Claude Code's settings.json
+// via atl setup-hooks. The throttle parameter pinned at 30m matches the
+// brainstorm's recommended default; users can re-tune later via
+// `atl config edit` (autoUpdate.throttleMinutes).
+func runFirstInstallHookSetup() string {
+	fmt.Println()
+	color.Cyan("Enable Claude Code auto-update hooks?")
+	fmt.Println("  Wires SessionStart + UserPromptSubmit hooks in ~/.claude/settings.json")
+	fmt.Println("  so atl pulls cache updates + scans transcripts for learning markers")
+	fmt.Println("  automatically. Throttled to once per 30m on prompt-submit.")
 	fmt.Println()
 	fmt.Println("  You can opt in / out any time with: `atl setup-hooks` / `atl setup-hooks --remove`")
 	fmt.Println()
@@ -140,23 +197,20 @@ func maybeOfferHookSetup() {
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		_ = writeMarker(markerPath, "no-response")
-		return
+		return "no-response"
 	}
 	answer := strings.TrimSpace(strings.ToLower(line))
 	if answer == "" || strings.HasPrefix(answer, "y") {
 		if err := runSetupHooks("30m"); err != nil {
 			color.Yellow("⚠ could not install hooks: %v", err)
 			color.Yellow("  You can retry later with `atl setup-hooks`.")
-			_ = writeMarker(markerPath, "install-failed")
-			return
+			return "install-failed"
 		}
-		_ = writeMarker(markerPath, "hooks-installed")
-		return
+		return "installed"
 	}
 
 	fmt.Println("  Skipped. Run `atl setup-hooks` whenever you want to enable this.")
-	_ = writeMarker(markerPath, "declined")
+	return "declined"
 }
 
 // writeMarker is tolerant — failure to write the marker just means we'll

@@ -130,10 +130,10 @@ func TestQuestion_IntValidatesRange(t *testing.T) {
 func TestSkipWhenDisabled_ThrottleSkippedWhenPromptSubmitOff(t *testing.T) {
 	m := newModel(ModeInit, config.DefaultAtlConfig(), "")
 	m = drive(m,
-		keyMsg(tea.KeyEnter),                 // welcome
-		keyMsg(tea.KeyEnter),                 // locale en
-		keyMsg(tea.KeyEnter),                 // sessionStartEnabled yes
-		keyMsg(tea.KeyRunes, 'n'),            // promptSubmitEnabled NO
+		keyMsg(tea.KeyEnter),      // welcome
+		keyMsg(tea.KeyEnter),      // locale en
+		keyMsg(tea.KeyEnter),      // sessionStartEnabled yes
+		keyMsg(tea.KeyRunes, 'n'), // promptSubmitEnabled NO
 	)
 	// Next visible question must be selfCheckEnabled (NOT throttleMinutes).
 	if m.questions[m.qIdx].id != "autoUpdate.selfCheckEnabled" {

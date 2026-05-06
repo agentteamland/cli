@@ -142,7 +142,7 @@ type model struct {
 	questions []question
 
 	phase  phase
-	qIdx   int    // which visible question is on screen (counted only across visible)
+	qIdx   int // which visible question is on screen (counted only across visible)
 	saved  bool
 	exited bool
 

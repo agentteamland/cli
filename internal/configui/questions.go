@@ -18,7 +18,7 @@ func questionList() []question {
 			template: tplEnum,
 			enumOptions: []enumOption{
 				{value: "en", desc: "English"},
-				{value: "tr", desc: "Türkçe (currently behaves as English; full TR ships later)"},
+				{value: "tr", desc: "Turkish (currently behaves as English; full TR ships later)"},
 			},
 			get: func(cfg config.AtlConfig) any { return cfg.CLI.Locale },
 			set: func(cfg *config.AtlConfig, v any) { cfg.CLI.Locale = v.(string) },

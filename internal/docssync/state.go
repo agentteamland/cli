@@ -84,7 +84,7 @@ type ProjectState struct {
 	ProcessedMarkers []string `json:"processedMarkers,omitempty"`
 
 	// CoverageBaseline is the inventory of skills / rules / agents
-	// observed by the kapsama-denetleyicisi sub-check on its last run.
+	// observed by the coverage-checker sub-check on its last run.
 	// The next run reads this and skips entirely when the inventory
 	// has not changed (incremental optimization).
 	CoverageBaseline *CoverageBaseline `json:"coverageBaseline,omitempty"`
@@ -268,8 +268,8 @@ func (s *State) SetCoverageBaseline(slug string, baseline CoverageBaseline) {
 }
 
 // SetLastReleaseTagSeen records the most-recent cli release tag the
-// skill observed during this run. The kapsama-denetleyicisi /
-// versiyon-referansı-tarayıcı sub-check uses this on subsequent runs
+// skill observed during this run. The coverage-checker /
+// version-ref-scanner sub-check uses this on subsequent runs
 // to skip when no new release has shipped.
 func (s *State) SetLastReleaseTagSeen(slug, tag string) {
 	if s.Projects == nil {

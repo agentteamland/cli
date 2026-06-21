@@ -17,6 +17,14 @@
 
 ---
 
+> [!IMPORTANT]
+> **This is the v1 `cli` repo — superseded by v2.** AgentTeamLand moved to **v2**, a single monorepo at **[github.com/agentteamland/atl](https://github.com/agentteamland/atl)** (CLI + core + teams + docs). v2 no longer ships through Homebrew/Scoop. Install or upgrade with:
+> ```sh
+> curl -fsSL https://raw.githubusercontent.com/agentteamland/atl/main/scripts/install.sh | sh   # macOS / Linux
+> irm https://raw.githubusercontent.com/agentteamland/atl/main/scripts/install.ps1 | iex        # Windows
+> ```
+> The content below describes v1 and is kept for history.
+
 `atl` is a single static Go binary (~7 MB, zero runtime dependencies). It installs agent teams from a registry into any project, keeps them current, and wires Claude Code hooks so updates + learning capture happen silently in the background.
 
 This repo holds the binary's source. Distribution is automated via [agentteamland/homebrew-tap](https://github.com/agentteamland/homebrew-tap) and [agentteamland/scoop-bucket](https://github.com/agentteamland/scoop-bucket) — every git tag triggers goreleaser, which ships binaries to both channels alongside GitHub Releases ZIP archives.
